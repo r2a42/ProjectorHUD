@@ -586,17 +586,6 @@ fn power_off_confirm(cfg: &ProjectorConfig) -> Act {
     })
 }
 
-/// A compact button for rows and headings.
-fn mini(ui: &mut egui::Ui, text: &str, width: f32) -> egui::Response {
-    ui.add(
-        egui::Button::new(RichText::new(text).size(12.0).color(mix(DIM, TEXT, 0.6)))
-            .fill(BUTTON)
-            .stroke(Stroke::new(1.0_f32, STROKE))
-            .rounding(6.0)
-            .min_size(Vec2::new(width, 24.0)),
-    )
-}
-
 impl App {
     fn top_bar(&mut self, ctx: &egui::Context, items: &[Item], acts: &mut Vec<Act>) {
         egui::TopBottomPanel::top("top")
@@ -735,7 +724,7 @@ impl App {
                 ui.add_space(4.0);
 
                 let all: Vec<&Item> = items.iter().collect();
-                let out = nav_row(ui, "All projectors", all.len(), worst(&all), self.view == Target::All, false);
+                let out = nav_row(ui, "All projectors", all.len(), worst(&all), self.view == Target::All, false, shutter_state(&all));
                 if out.resp.clicked() {
                     acts.push(Act::View(Target::All));
                 }
@@ -764,7 +753,7 @@ impl App {
                     let next = ui.available_rect_before_wrap();
                     let row_rect = egui::Rect::from_min_size(next.min, Vec2::new(next.width(), 34.0));
                     let (over, dropped) = drop_zone(ui, row_rect);
-                    let out = nav_row(ui, &g, members.len(), worst(&members), self.view == Target::Group(g.clone()), over);
+                    let out = nav_row(ui, &g, members.len(), worst(&members), self.view == Target::Group(g.clone()), over, shutter_state(&members));
                     if let Some(ids) = dropped {
                         acts.push(Act::MoveToGroup(ids, Some(g.clone())));
                     }
@@ -853,36 +842,21 @@ impl App {
                             Target::Group(g) => format!("all {n} in {g}"),
                             _ => format!("all {n} projectors"),
                         };
+                        let ids: Vec<u64> = visible.iter().map(|i| i.0.id).collect();
                         ui.add_enabled_ui(n > 0, |ui| {
-                            if ui.button("Open shutters").clicked() {
-                                acts.push(Act::SendTarget(self.view.clone(), Command::VideoMute(false)));
+                            let shutters = shutter_state(&visible);
+                            if let Some(close) = group_toggle(ui, Kind::Shutter, shutters, ("Close shutters", "Open shutters"), 0.0, 30.0, 14.0) {
+                                acts.push(Act::SendMany(ids.clone(), Command::VideoMute(close)));
                             }
-                            if ui.button("Close shutters").clicked() {
-                                acts.push(Act::SendTarget(self.view.clone(), Command::VideoMute(true)));
-                            }
-                            if ui.button("Power off all").clicked() {
-                                acts.push(Act::Confirm(Confirm {
-                                    title: format!("Power off {scope}?"),
-                                    body: "They will cool down and go to standby.".into(),
-                                    button: "Power off all".into(),
-                                    danger: true,
-                                    act: Box::new(Act::SendTarget(self.view.clone(), Command::PowerOff)),
-                                }));
-                            }
-                            if ui.button("Power on all").clicked() {
-                                acts.push(Act::Confirm(Confirm {
-                                    title: format!("Power on {scope}?"),
-                                    body: "Projectors already on are not affected.".into(),
-                                    button: "Power on all".into(),
-                                    danger: false,
-                                    act: Box::new(Act::SendTarget(self.view.clone(), Command::PowerOn)),
-                                }));
+                            let power = power_state(&visible);
+                            if let Some(on) = group_toggle(ui, Kind::Power, power, ("Power on all", "Power off all"), 0.0, 30.0, 14.0) {
+                                acts.push(power_many(ids.clone(), on, &scope));
                             }
                         });
                     });
                 });
 
-                self.tools_row(ui, acts);
+                self.tools_row(ui, items, acts);
                 ui.add_space(4.0);
 
                 let mut order: Vec<u64> = Vec::new();
@@ -948,7 +922,7 @@ impl App {
     }
 
     /// Sorting, and what to do with the highlighted projectors.
-    fn tools_row(&mut self, ui: &mut egui::Ui, acts: &mut Vec<Act>) {
+    fn tools_row(&mut self, ui: &mut egui::Ui, items: &[Item], acts: &mut Vec<Act>) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
             ui.spacing_mut().button_padding = Vec2::new(10.0, 3.0);
@@ -965,23 +939,12 @@ impl App {
             if n > 1 {
                 let ids: Vec<u64> = self.selection.iter().copied().collect();
                 ui.label(RichText::new(format!("{n} selected")).color(ACCENT).strong());
-                if mini(ui, "Power on", 0.0).clicked() {
-                    acts.push(Act::SendMany(ids.clone(), Command::PowerOn));
+                let sel: Vec<&Item> = items.iter().filter(|i| self.selection.contains(&i.0.id)).collect();
+                if let Some(on) = group_toggle(ui, Kind::Power, power_state(&sel), ("Power on", "Power off"), 0.0, 24.0, 12.0) {
+                    acts.push(power_many(ids.clone(), on, &format!("the {n} selected projectors")));
                 }
-                if mini(ui, "Power off", 0.0).clicked() {
-                    acts.push(Act::Confirm(Confirm {
-                        title: format!("Power off the {n} selected projectors?"),
-                        body: "They will cool down and go to standby.".into(),
-                        button: "Power off".into(),
-                        danger: true,
-                        act: Box::new(Act::SendMany(ids.clone(), Command::PowerOff)),
-                    }));
-                }
-                if mini(ui, "Close shutters", 0.0).clicked() {
-                    acts.push(Act::SendMany(ids.clone(), Command::VideoMute(true)));
-                }
-                if mini(ui, "Open shutters", 0.0).clicked() {
-                    acts.push(Act::SendMany(ids.clone(), Command::VideoMute(false)));
+                if let Some(close) = group_toggle(ui, Kind::Shutter, shutter_state(&sel), ("Close shutters", "Open shutters"), 0.0, 24.0, 12.0) {
+                    acts.push(Act::SendMany(ids.clone(), Command::VideoMute(close)));
                 }
                 ui.menu_button(RichText::new("Move to…").size(12.0), |ui| {
                     if ui.button("No group").clicked() {
@@ -1043,11 +1006,17 @@ impl App {
                 ui.spacing_mut().button_padding = Vec2::new(10.0, 3.0);
                 ui.add_enabled_ui(!members.is_empty(), |ui| {
                     let ids: Vec<u64> = members.iter().map(|i| i.0.id).collect();
-                    if mini(ui, "Open shutters", 0.0).clicked() {
-                        acts.push(Act::SendMany(ids.clone(), Command::VideoMute(false)));
-                    }
-                    if mini(ui, "Close shutters", 0.0).clicked() {
-                        acts.push(Act::SendMany(ids, Command::VideoMute(true)));
+                    let shutters = shutter_state(members);
+                    if let Some(close) = group_toggle(
+                        ui,
+                        Kind::Shutter,
+                        shutters,
+                        ("Close shutters", "Open shutters"),
+                        0.0,
+                        24.0,
+                        12.0,
+                    ) {
+                        acts.push(Act::SendMany(ids, Command::VideoMute(close)));
                     }
                 });
                 // A rule from the title to the buttons.
@@ -1322,8 +1291,7 @@ impl App {
             );
             row.spacing_mut().item_spacing.x = 6.0;
             row.spacing_mut().button_padding = Vec2::new(4.0, 4.0);
-            let bw = ((inner.width() - 18.0) / 4.0).floor();
-            control_buttons(&mut row, Vec2::new(bw, 30.0), cfg, st, acts);
+            control_buttons(&mut row, inner.width(), 30.0, cfg, st, acts);
         }
     }
 
@@ -1366,8 +1334,8 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         ui.spacing_mut().button_padding = Vec2::new(4.0, 4.0);
-                        let bw = ((ui.available_width() - 18.0) / 4.0).floor();
-                        control_buttons(ui, Vec2::new(bw, 34.0), cfg, st, acts);
+                        let w = ui.available_width();
+                        control_buttons(ui, w, 34.0, cfg, st, acts);
                     });
                     let on = st.link == Link::Online && st.power == Power::On;
                     if on && st.class >= 2 {
@@ -1542,25 +1510,42 @@ fn remove_confirm(cfg: &ProjectorConfig) -> Act {
 }
 
 /// Power / Shutter / Mute / Freeze, shared by cards and the detail panel.
+/// Power and shutter are coloured by their present state and labelled with
+/// what a click will do.
 fn control_buttons(
     ui: &mut egui::Ui,
-    size: Vec2,
+    width: f32,
+    height: f32,
     cfg: &ProjectorConfig,
     st: &ProjectorState,
     acts: &mut Vec<Act>,
 ) {
     let online = st.link == Link::Online;
     let on = online && st.power == Power::On;
+    let usable = width - ui.spacing().item_spacing.x * 3.0;
+    let wide = (usable * 0.31).floor();
+    let narrow = ((usable - wide * 2.0) / 2.0).floor();
 
-    let (label, enabled, accent) = match st.power {
-        _ if !online => ("Power", false, None),
-        Power::Standby => ("Power on", true, Some(GREEN)),
-        Power::On => ("Power off", true, None),
-        Power::Warming => ("Warming…", false, None),
-        Power::Cooling => ("Cooling…", false, None),
-        Power::Unknown => ("Power", false, None),
+    let (label, look, enabled, tip) = match st.power {
+        _ if !online => ("Power", Look::Neutral, false, "Not reachable"),
+        Power::Standby => (
+            "Power on",
+            POWER_OFF,
+            true,
+            "The projector is off. Click to power it on.",
+        ),
+        Power::On => (
+            "Power off",
+            POWER_ON,
+            true,
+            "The projector is on. Click to power it off.",
+        ),
+        Power::Warming => ("Warming…", Look::Neutral, false, "Warming up"),
+        Power::Cooling => ("Cooling…", Look::Neutral, false, "Cooling down"),
+        Power::Unknown => ("Power", Look::Neutral, false, "Power state unknown"),
     };
-    if toggle(ui, size, label, accent, enabled).clicked() {
+    let r = state_button(ui, Vec2::new(wide, height), label, 13.0, look, enabled);
+    if r.on_hover_text(tip).on_disabled_hover_text(tip).clicked() {
         acts.push(if st.power == Power::On {
             power_off_confirm(cfg)
         } else {
@@ -1568,23 +1553,35 @@ fn control_buttons(
         });
     }
 
-    let shut = st.video_mute == Some(true);
-    let r = toggle(
-        ui,
-        size,
-        "Shutter",
-        shut.then_some(AMBER),
-        on && st.video_mute.is_some(),
-    );
-    let tip = if shut {
-        "Shutter is closed. Click to open."
-    } else {
-        "Close the shutter (blank the picture)"
+    let (label, look, enabled, tip) = match st.video_mute {
+        Some(true) if on => (
+            "Open shutter",
+            SHUTTER_CLOSED,
+            true,
+            "The shutter is closed. Click to open it.",
+        ),
+        Some(false) if on => (
+            "Close shutter",
+            SHUTTER_OPEN,
+            true,
+            "The shutter is open. Click to close it.",
+        ),
+        _ => (
+            "Shutter",
+            Look::Neutral,
+            false,
+            "Available when the projector is on",
+        ),
     };
-    if r.on_hover_text(tip).clicked() {
-        acts.push(Act::Send(cfg.id, Command::VideoMute(!shut)));
+    let r = state_button(ui, Vec2::new(wide, height), label, 13.0, look, enabled);
+    if r.on_hover_text(tip).on_disabled_hover_text(tip).clicked() {
+        acts.push(Act::Send(
+            cfg.id,
+            Command::VideoMute(st.video_mute != Some(true)),
+        ));
     }
 
+    let size = Vec2::new(narrow, height);
     let muted = st.audio_mute == Some(true);
     let r = toggle(
         ui,
@@ -1622,6 +1619,141 @@ fn control_buttons(
     {
         acts.push(Act::Send(cfg.id, Command::Freeze(!frozen)));
     }
+}
+
+/// The state of a whole group, for its buttons.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Tri {
+    AllOn,
+    AllOff,
+    Mixed,
+    Unknown,
+}
+
+fn tri(states: impl Iterator<Item = bool>) -> Tri {
+    let (mut on, mut off) = (false, false);
+    for s in states {
+        if s {
+            on = true;
+        } else {
+            off = true;
+        }
+    }
+    match (on, off) {
+        (true, true) => Tri::Mixed,
+        (true, false) => Tri::AllOn,
+        (false, true) => Tri::AllOff,
+        (false, false) => Tri::Unknown,
+    }
+}
+
+/// "On" means closed. Only projectors that are on and report their shutter count.
+fn shutter_state(items: &[&Item]) -> Tri {
+    tri(items
+        .iter()
+        .filter(|i| i.1.link == Link::Online && i.1.power == Power::On)
+        .filter_map(|i| i.1.video_mute))
+}
+
+fn power_state(items: &[&Item]) -> Tri {
+    tri(items
+        .iter()
+        .filter(|i| i.1.link == Link::Online)
+        .filter_map(|i| match i.1.power {
+            Power::On | Power::Warming => Some(true),
+            Power::Standby | Power::Cooling => Some(false),
+            Power::Unknown => None,
+        }))
+}
+
+#[derive(Clone, Copy)]
+enum Kind {
+    Power,
+    Shutter,
+}
+
+/// The button (or pair) for a group. `labels` are (turn on / close, turn off / open).
+/// When every member is in the same state there is one button in that state's
+/// colour saying what it will do; a mixed group gets both, striped.
+/// Returns the state to put the group in: `Some(true)` = power on / close shutters.
+fn group_toggle(
+    ui: &mut egui::Ui,
+    kind: Kind,
+    state: Tri,
+    labels: (&str, &str),
+    each: f32,
+    height: f32,
+    font: f32,
+) -> Option<bool> {
+    let enabled = ui.is_enabled();
+    let (on_look, off_look) = match kind {
+        Kind::Power => (POWER_ON, POWER_OFF),
+        Kind::Shutter => (SHUTTER_CLOSED, SHUTTER_OPEN),
+    };
+    let single = if each > 0.0 {
+        each * 2.0 + ui.spacing().item_spacing.x
+    } else {
+        0.0
+    };
+    match state {
+        Tri::AllOn => state_button(
+            ui,
+            Vec2::new(single, height),
+            labels.1,
+            font,
+            on_look,
+            enabled,
+        )
+        .clicked()
+        .then_some(false),
+        Tri::AllOff => state_button(
+            ui,
+            Vec2::new(single, height),
+            labels.0,
+            font,
+            off_look,
+            enabled,
+        )
+        .clicked()
+        .then_some(true),
+        Tri::Mixed | Tri::Unknown => {
+            let look = if state == Tri::Mixed {
+                Look::striped(on_look, off_look)
+            } else {
+                Look::Neutral
+            };
+            let mut out = None;
+            if state_button(ui, Vec2::new(each, height), labels.0, font, look, enabled).clicked() {
+                out = Some(true);
+            }
+            if state_button(ui, Vec2::new(each, height), labels.1, font, look, enabled).clicked() {
+                out = Some(false);
+            }
+            out
+        }
+    }
+}
+
+fn power_many(ids: Vec<u64>, on: bool, scope: &str) -> Act {
+    Act::Confirm(Confirm {
+        title: format!("Power {} {scope}?", if on { "on" } else { "off" }),
+        body: if on {
+            "Projectors already on are not affected."
+        } else {
+            "They will cool down and go to standby."
+        }
+        .into(),
+        button: if on { "Power on" } else { "Power off" }.into(),
+        danger: !on,
+        act: Box::new(Act::SendMany(
+            ids,
+            if on {
+                Command::PowerOn
+            } else {
+                Command::PowerOff
+            },
+        )),
+    })
 }
 
 fn input_combo(ui: &mut egui::Ui, id: u64, st: &ProjectorState, width: f32, acts: &mut Vec<Act>) {
@@ -1664,6 +1796,7 @@ fn nav_row(
     sev: Severity,
     selected: bool,
     drop_hover: bool,
+    shutters: Tri,
 ) -> NavOut {
     const BTN_W: f32 = 42.0;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), Sense::hover());
@@ -1723,18 +1856,15 @@ fn nav_row(
     child.spacing_mut().item_spacing.x = 4.0;
     child.spacing_mut().button_padding = Vec2::new(2.0, 2.0);
     child.add_enabled_ui(count > 0, |ui| {
-        if mini(ui, "Close", BTN_W)
-            .on_hover_text(format!("Close shutters: {label}"))
-            .clicked()
-        {
-            shutter = Some(true);
-        }
-        if mini(ui, "Open", BTN_W)
-            .on_hover_text(format!("Open shutters: {label}"))
-            .clicked()
-        {
-            shutter = Some(false);
-        }
+        shutter = group_toggle(
+            ui,
+            Kind::Shutter,
+            shutters,
+            ("Close", "Open"),
+            BTN_W,
+            24.0,
+            12.0,
+        );
     });
     NavOut { resp, shutter }
 }
