@@ -232,3 +232,54 @@ fn worker_reports_offline_then_recovers() {
         std::thread::sleep(Duration::from_millis(50));
     }
 }
+
+#[test]
+fn shutter_falls_back_to_combined_av_mute() {
+    // A projector that only accepts AVMT 30/31 and does not say it is a Panasonic.
+    let sim = sim::spawn(SimSpec {
+        av_mute_only: true,
+        powered: true,
+        ..fast_spec()
+    })
+    .unwrap();
+    let mut d = PjLinkDriver::new("127.0.0.1", sim.port, "", Log::default());
+    let mut st = ProjectorState::default();
+    poll(&mut d, &mut st).unwrap();
+    assert_eq!(st.video_mute, Some(false));
+
+    d.command(&Command::VideoMute(true)).unwrap();
+    poll(&mut d, &mut st).unwrap();
+    assert_eq!(st.video_mute, Some(true));
+    assert_eq!(
+        st.audio_mute, None,
+        "no separate audio mute on this projector"
+    );
+    assert!(d.command(&Command::AudioMute(true)).is_err());
+
+    d.command(&Command::VideoMute(false)).unwrap();
+    poll(&mut d, &mut st).unwrap();
+    assert_eq!(st.video_mute, Some(false));
+}
+
+#[test]
+fn panasonic_shutter_uses_av_mute_from_the_start() {
+    let sim = sim::spawn(SimSpec {
+        manufacturer: "Panasonic".into(),
+        av_mute_only: true,
+        powered: true,
+        ..fast_spec()
+    })
+    .unwrap();
+    let log = Log::default();
+    let mut d = PjLinkDriver::new("127.0.0.1", sim.port, "", log.clone());
+    let mut st = ProjectorState::default();
+    poll(&mut d, &mut st).unwrap();
+    assert_eq!(st.audio_mute, None);
+    d.command(&Command::VideoMute(true)).unwrap();
+    let sent: Vec<String> = log.snapshot().into_iter().map(|e| e.text).collect();
+    assert!(sent.iter().any(|l| l == "%1AVMT 31"));
+    assert!(
+        !sent.iter().any(|l| l == "%1AVMT 11"),
+        "never sends the form Panasonic refuses"
+    );
+}

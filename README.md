@@ -11,7 +11,8 @@ Monitor and control a fleet of networked projectors from one window. Free, open 
 - **Status at a glance**: live power state, input, lamp hours, and model for every projector.
 - **Faults are impossible to miss**: fan, lamp, temperature, cover and filter problems, plus projectors that drop off the network, turn the card red or amber and appear in a banner across the top of the window.
 - **Discovery**: finds projectors on your LAN by PJLink broadcast search and by sweeping each local subnet. Other subnets/VLANs can be scanned by prefix.
-- **Groups**: organize projectors by room or rig.
+- **Groups**: organize projectors by room or rig. *All projectors* lists each group under its own subheading; select several projectors (Cmd/Ctrl-click, Shift-click) and drag them between groups; double-click a group to rename it. Every group has its own shutter open and close buttons.
+- **Sorting**: by name, IP address or type.
 - **Schedules**: timed power and shutter commands by day of week (while the app is open).
 - **Command log**: every byte exchanged with a projector, for troubleshooting.
 - **Demo mode**: six simulated projectors, so you can try everything without hardware.
