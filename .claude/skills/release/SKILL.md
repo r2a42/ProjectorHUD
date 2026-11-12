@@ -55,9 +55,9 @@ do the same.
 
 ## Signing
 
-`release.yml` signs and notarises the Mac app when the repository has the Apple secrets
+`release.yml` signs and notarises the Mac app with the repository's Apple secrets
 (`MACOS_CERT_P12`, `MACOS_CERT_PASSWORD`, `APPLE_API_KEY_P8`, `APPLE_API_KEY_ID`,
-`APPLE_API_ISSUER_ID`: the same five NewQ uses), and signs the Windows program with
-`WINDOWS_CERT_PFX` / `WINDOWS_CERT_PASSWORD`. Without them the Mac app is ad-hoc signed and
-the Windows program unsigned; when the secrets are added, update `.github/release_notes.md`,
-which tells users the builds are unsigned.
+`APPLE_API_ISSUER_ID`: the same five NewQ uses; set on 2026-11-12). Apple can take up to
+about 30 minutes to notarise, so the macOS build job is the slow one. Without the secrets
+the Mac app is only ad-hoc signed. The Windows program is unsigned until
+`WINDOWS_CERT_PFX` / `WINDOWS_CERT_PASSWORD` exist.

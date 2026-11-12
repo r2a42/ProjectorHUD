@@ -14,10 +14,9 @@ yet, so SmartScreen may warn: choose *More info → Run anyway*.
 **Linux:** extract and run `./projectorhud`. Needs an OpenGL-capable graphics
 driver and X11 or Wayland.
 
-**macOS:** unzip and move `ProjectorHUD.app` to Applications. These builds
-aren't signed with an Apple Developer ID yet, so macOS refuses the first open:
-go to *System Settings → Privacy & Security* and choose *Open Anyway*. The
-first time it searches for projectors, macOS asks to allow access to the local
-network: choose *Allow*.
+**macOS:** unzip and move `ProjectorHUD.app` to Applications. The app is signed
+and notarised by Apple; the first time, macOS says it was downloaded from the
+Internet: choose *Open*. The first time it searches for projectors, macOS asks
+to allow access to the local network: choose *Allow*.
 
 `SHA256SUMS.txt` lists checksums for every file.
