@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Used when the release is signed with a Developer ID (hardened runtime).
+       ProjectorHUD only opens network connections to projectors, which the
+       hardened runtime allows without any entitlement. -->
+</dict>
+</plist>

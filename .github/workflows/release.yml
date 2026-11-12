@@ -1,0 +1,266 @@
+name: Release
+
+# Push a tag like `v0.1.0` to build binaries for Windows, Linux and macOS and
+# publish them as a GitHub Release. Run it by hand with a tag to rebuild that
+# release, or with no tag for a dry run that only uploads workflow artifacts.
+#
+# A tagged release is built as a draft: `prepare` makes it, each build adds its
+# download to it, and `publish` adds the checksums and releases it, so a failed
+# build never leaves a half-finished public release. Downloads go on the release
+# itself rather than through Actions artifact storage, which has a small quota
+# and can fill up.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build and publish, e.g. v0.1.0. Leave empty for a dry run."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+
+jobs:
+  # Check who asked and what for before anything is built or published. A tag
+  # pushed by hand starts this workflow, and so does `Cut release` (as the
+  # Actions bot) and the repository owner from the Actions tab; nobody else
+  # may start it by hand, and what is released must be a real tag of the form
+  # vX.Y.Z whose version is the one in Cargo.toml.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Who started this
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          echo "Started by $ACTOR"
+          if [ "$ACTOR" != "$OWNER" ] && [ "$ACTOR" != "github-actions[bot]" ]; then
+            echo "Only the repository owner, or the Cut release workflow, may start a release by hand." >&2
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        if: env.TAG != ''
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Check the tag
+        if: env.TAG != ''
+        run: |
+          # Checking out a branch name would build that branch and publish it
+          # under the name: it has to be a tag.
+          git show-ref --verify --quiet "refs/tags/$TAG" || { echo "$TAG is not a tag" >&2; exit 1; }
+          scripts/check_release_tag.sh "$TAG"
+
+  prepare:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Create the draft release
+        if: env.TAG != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sed "s/{{TAG}}/$TAG/g" .github/release_notes.md > notes.md
+          # A tag with a suffix (v0.2.0-rc1) is a pre-release, not the latest release.
+          pre=""
+          case "$TAG" in *-*) pre="--prerelease" ;; esac
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "A release for $TAG already exists; adding to it."
+          else
+            gh release create "$TAG" --draft --title "ProjectorHUD $TAG" --notes-file notes.md $pre
+          fi
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows-x64
+          # Older Ubuntu = older glibc, so the binary runs on more distributions.
+          - os: ubuntu-22.04
+            platform: linux-x64
+          - os: macos-latest
+            platform: macos-universal
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Version label
+        shell: bash
+        run: echo "LABEL=${TAG:-dev-${GITHUB_SHA::7}}" >> "$GITHUB_ENV"
+      # Which signing secrets exist (a step's own env can't be used in its `if`).
+      - name: Check for signing secrets
+        id: signing
+        shell: bash
+        env:
+          MAC_CERT: ${{ secrets.MACOS_CERT_P12 }}
+          WIN_CERT: ${{ secrets.WINDOWS_CERT_PFX }}
+        run: |
+          echo "mac=$([ -n "$MAC_CERT" ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
+          echo "windows=$([ -n "$WIN_CERT" ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          # See ci.yml: use public DNS when the runner's can't find Ubuntu's archive.
+          if ! timeout 15 getent ahostsv4 azure.archive.ubuntu.com > /dev/null; then
+            echo "::warning::azure.archive.ubuntu.com does not resolve with the runner's DNS"
+            resolvectl status || true
+            for ns in 127.0.0.53 168.63.129.16 8.8.8.8 1.1.1.1; do
+              echo "== $ns"; timeout 10 dig +short +time=3 +tries=1 @"$ns" azure.archive.ubuntu.com A || true
+            done
+            sudo mkdir -p /etc/systemd/resolved.conf.d
+            printf '[Resolve]\nDNS=8.8.8.8 1.1.1.1\nDomains=~.\n' | sudo tee /etc/systemd/resolved.conf.d/public.conf
+            sudo systemctl restart systemd-resolved
+            timeout 15 getent ahostsv4 azure.archive.ubuntu.com || echo "::warning::still not resolving"
+          fi
+          sudo apt-get update
+          sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libgtk-3-dev
+
+      - name: Build
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            cargo build --release --locked --target aarch64-apple-darwin
+            cargo build --release --locked --target x86_64-apple-darwin
+            mkdir -p target/release
+            lipo -create -output target/release/projectorhud \
+              target/aarch64-apple-darwin/release/projectorhud target/x86_64-apple-darwin/release/projectorhud
+          else
+            cargo build --release --locked
+          fi
+
+      # Windows: sign projectorhud.exe when a code-signing certificate is set up as
+      # repository secrets (WINDOWS_CERT_PFX: the .pfx file in base64;
+      # WINDOWS_CERT_PASSWORD). Without them the build is unsigned and Windows
+      # SmartScreen warns on the first run. Not tried yet: it is a placeholder.
+      - name: Sign projectorhud.exe (Windows)
+        if: runner.os == 'Windows' && steps.signing.outputs.windows == 'yes'
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'cert.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX))
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 `
+            /tr http://timestamp.digicert.com /td SHA256 /d "ProjectorHUD" target/release/projectorhud.exe
+          if ($LASTEXITCODE -ne 0) { throw "signtool failed" }
+          & $signtool.FullName verify /pa target/release/projectorhud.exe
+          if ($LASTEXITCODE -ne 0) { throw "signature did not verify" }
+          Remove-Item $pfx
+
+      # macOS: sign with a Developer ID and notarise when the Apple secrets are
+      # set (MACOS_CERT_P12 and MACOS_CERT_PASSWORD: the Developer ID
+      # Application certificate as base64 and its password; APPLE_API_KEY_P8
+      # base64, APPLE_API_KEY_ID, APPLE_API_ISSUER_ID: an App Store Connect API
+      # key). Without them the app is only ad-hoc signed and macOS refuses to
+      # open it until the user allows it. The same steps sign NewQ's releases.
+      - name: Import the signing certificate (macOS)
+        if: runner.os == 'macOS' && steps.signing.outputs.mac == 'yes'
+        shell: bash
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          kc="$RUNNER_TEMP/projectorhud-signing.keychain-db"
+          pw="$(uuidgen)"
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pw" "$kc" > /dev/null
+          security list-keychains -d user -s "$kc" login.keychain-db
+          identity="$(security find-identity -v -p codesigning "$kc" | sed -nE 's/.*"(Developer ID Application: .*)"/\1/p' | head -1)"
+          if [ -z "$identity" ]; then
+            echo "no Developer ID Application certificate in the .p12" >&2
+            security find-identity -v -p codesigning "$kc" >&2
+            exit 1
+          fi
+          echo "signing as: $identity"
+          echo "MACOS_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          if [ -n "$APPLE_API_KEY_P8" ]; then
+            # The secret is the base64 of the .p8 file; the file's own text
+            # (-----BEGIN PRIVATE KEY-----) pasted in as it is works too.
+            if printf '%s' "$APPLE_API_KEY_P8" | grep -q -- '-----BEGIN'; then
+              printf '%s\n' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+            else
+              printf '%s' "$APPLE_API_KEY_P8" | tr -d ' \r\n' | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+            fi
+            if ! head -1 "$RUNNER_TEMP/AuthKey.p8" | grep -q -- '-----BEGIN PRIVATE KEY-----'; then
+              echo "APPLE_API_KEY_P8 is not an Apple .p8 key (after decoding it should start with -----BEGIN PRIVATE KEY-----)" >&2
+              # Sizes only, never the contents: a real key is about 250 bytes, or about 340 characters in base64.
+              echo "the secret is $(printf '%s' "$APPLE_API_KEY_P8" | wc -c | tr -d ' ') characters; decoded it is $(wc -c < "$RUNNER_TEMP/AuthKey.p8" | tr -d ' ') bytes" >&2
+              exit 1
+            fi
+            echo "the notarisation key looks right ($(wc -l < "$RUNNER_TEMP/AuthKey.p8") lines)"
+            echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+            echo "APPLE_API_KEY_ID=$APPLE_API_KEY_ID" >> "$GITHUB_ENV"
+            echo "APPLE_API_ISSUER_ID=$APPLE_API_ISSUER_ID" >> "$GITHUB_ENV"
+          fi
+
+      - name: Package
+        shell: bash
+        run: bash scripts/package_release.sh "${{ matrix.platform }}" "$LABEL"
+
+      # A tagged release goes straight onto the draft release made by `prepare`.
+      - name: Add to the release
+        if: env.TAG != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist/* --clobber
+
+      # A dry run has no release, so keep the packages briefly as an artifact.
+      - uses: actions/upload-artifact@v4
+        if: env.TAG == ''
+        with:
+          name: ${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build
+    if: github.ref_type == 'tag' || inputs.tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir dist
+          gh release download "$TAG" --dir dist --clobber
+          rm -f dist/SHA256SUMS.txt
+          ls -l dist
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+          gh release upload "$TAG" dist/SHA256SUMS.txt --clobber
+          sed "s/{{TAG}}/$TAG/g" .github/release_notes.md > notes.md
+          # A tag with a suffix (v0.2.0-rc1) is a pre-release, not the latest release.
+          pre=""
+          case "$TAG" in *-*) pre="--prerelease" ;; esac
+          gh release edit "$TAG" --draft=false --notes-file notes.md $pre
