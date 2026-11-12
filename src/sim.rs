@@ -24,6 +24,8 @@ pub struct SimSpec {
     pub errors: [u8; 6],
     pub lamp_hours: u32,
     pub powered: bool,
+    /// Start with the shutter closed (only meaningful when powered).
+    pub shutter_closed: bool,
     pub inputs: Vec<(String, String)>,
     /// Like Panasonic: only AVMT 30/31 is accepted, 10/11/20/21 answer ERR2.
     pub av_mute_only: bool,
@@ -44,6 +46,7 @@ impl Default for SimSpec {
             errors: [0; 6],
             lamp_hours: 120,
             powered: false,
+            shutter_closed: false,
             inputs: vec![
                 ("31".into(), "HDMI 1".into()),
                 ("32".into(), "HDMI 2".into()),
@@ -145,7 +148,7 @@ pub fn spawn(spec: SimSpec) -> io::Result<SimHandle> {
             .first()
             .map(|i| i.0.clone())
             .unwrap_or_else(|| "31".into()),
-        video_mute: false,
+        video_mute: spec.shutter_closed,
         audio_mute: false,
         freeze: false,
         spec,
@@ -456,6 +459,7 @@ pub fn demo_fleet() -> Vec<SimSpec> {
         },
         SimSpec {
             name: "Main Stage Right".into(),
+            shutter_closed: true,
             manufacturer: "Panasonic".into(),
             av_mute_only: true,
             model: "PT-RZ120".into(),

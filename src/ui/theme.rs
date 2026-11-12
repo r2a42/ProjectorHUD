@@ -190,3 +190,139 @@ pub fn thousands(n: u32) -> String {
     }
     out
 }
+
+/// How a state button is drawn: the colour shows the present state, the
+/// label says what a click will do.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Look {
+    Solid {
+        fill: Color32,
+        text: Color32,
+    },
+    /// A group whose members are in different states.
+    Striped(Color32, Color32),
+    Neutral,
+}
+
+const INK: Color32 = Color32::from_rgb(0x08, 0x0B, 0x10);
+/// Shutter closed: black. Shutter open: white.
+pub const SHUTTER_CLOSED: Look = Look::Solid {
+    fill: Color32::from_rgb(0x04, 0x05, 0x07),
+    text: TEXT,
+};
+pub const SHUTTER_OPEN: Look = Look::Solid {
+    fill: Color32::from_rgb(0xF2, 0xF4, 0xF7),
+    text: INK,
+};
+/// Power on: green. Power off: red.
+pub const POWER_ON: Look = Look::Solid {
+    fill: GREEN,
+    text: INK,
+};
+pub const POWER_OFF: Look = Look::Solid {
+    fill: Color32::from_rgb(0xD9, 0x48, 0x48),
+    text: Color32::WHITE,
+};
+
+impl Look {
+    fn fill(self) -> Color32 {
+        match self {
+            Look::Solid { fill, .. } => fill,
+            _ => BUTTON,
+        }
+    }
+    pub fn striped(a: Look, b: Look) -> Look {
+        Look::Striped(a.fill(), b.fill())
+    }
+}
+
+pub fn state_button(
+    ui: &mut Ui,
+    min_size: Vec2,
+    text: &str,
+    font: f32,
+    look: Look,
+    enabled: bool,
+) -> Response {
+    let look = if enabled { look } else { Look::Neutral };
+    let text_color = match look {
+        Look::Solid { text, .. } => text,
+        Look::Striped(..) => TEXT,
+        Look::Neutral if enabled => TEXT,
+        Look::Neutral => FAINT,
+    };
+    let galley =
+        ui.painter()
+            .layout_no_wrap(text.to_string(), FontId::proportional(font), text_color);
+    let size = Vec2::new(
+        min_size.x.max(galley.size().x + 12.0),
+        min_size.y.max(galley.size().y + 6.0),
+    );
+    let (rect, resp) = ui.allocate_exact_size(
+        size,
+        if enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
+    );
+    if !ui.is_rect_visible(rect) {
+        return resp;
+    }
+    let lift = if resp.is_pointer_button_down_on() {
+        0.22
+    } else if resp.hovered() {
+        0.12
+    } else {
+        0.0
+    };
+    let p = ui.painter();
+    let text_pos = rect.center() - galley.size() / 2.0;
+    match look {
+        Look::Solid { fill, text } => {
+            // Lighten dark buttons and darken light ones on hover.
+            p.rect(
+                rect,
+                8.0,
+                mix(fill, text, lift),
+                Stroke::new(1.0_f32, mix(fill, text, 0.35)),
+            );
+        }
+        Look::Striped(a, b) => {
+            p.rect_filled(rect, 8.0, b);
+            let clip = p.with_clip_rect(rect.shrink(1.0));
+            let h = rect.height();
+            let mut x = rect.left() - h;
+            while x < rect.right() {
+                clip.line_segment(
+                    [egui::pos2(x, rect.bottom()), egui::pos2(x + h, rect.top())],
+                    Stroke::new(6.0_f32, a),
+                );
+                x += 16.0;
+            }
+            p.rect_stroke(
+                rect,
+                8.0,
+                Stroke::new(1.5_f32, mix(STROKE, TEXT, 0.3 + lift)),
+            );
+            // Text needs a plain backing to stay readable over the stripes.
+            let back =
+                egui::Rect::from_min_size(text_pos, galley.size()).expand2(Vec2::new(5.0, 1.0));
+            p.rect_filled(
+                back,
+                5.0,
+                Color32::from_rgba_unmultiplied(0x10, 0x14, 0x1B, 235),
+            );
+        }
+        Look::Neutral => {
+            let fill = if enabled {
+                mix(BUTTON, TEXT, lift * 0.5)
+            } else {
+                mix(BUTTON, BG, 0.45)
+            };
+            p.rect(rect, 8.0, fill, Stroke::new(1.0_f32, STROKE));
+        }
+    }
+    p.galley(text_pos, galley, text_color);
+    resp
+}
