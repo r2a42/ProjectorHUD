@@ -289,17 +289,7 @@ pub fn state_button(
             );
         }
         Look::Striped(a, b) => {
-            p.rect_filled(rect, 8.0, b);
-            let clip = p.with_clip_rect(rect.shrink(1.0));
-            let h = rect.height();
-            let mut x = rect.left() - h;
-            while x < rect.right() {
-                clip.line_segment(
-                    [egui::pos2(x, rect.bottom()), egui::pos2(x + h, rect.top())],
-                    Stroke::new(6.0_f32, a),
-                );
-                x += 16.0;
-            }
+            stripes(p, rect, 8.0, a, b);
             p.rect_stroke(
                 rect,
                 8.0,
@@ -327,21 +317,48 @@ pub fn state_button(
     resp
 }
 
+fn stripes(p: &egui::Painter, rect: egui::Rect, rounding: f32, a: Color32, b: Color32) {
+    p.rect_filled(rect, rounding, b);
+    let clip = p.with_clip_rect(rect.shrink(1.0));
+    let h = rect.height();
+    let mut x = rect.left() - h;
+    while x < rect.right() {
+        clip.line_segment(
+            [egui::pos2(x, rect.bottom()), egui::pos2(x + h, rect.top())],
+            Stroke::new(6.0_f32, a),
+        );
+        x += 16.0;
+    }
+}
+
 /// The present state, shown between the two buttons that change it.
+/// Striped when a group's members are in different states.
 pub fn status_bar(ui: &mut Ui, size: Vec2, text: &str, look: Look) {
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
-    let bar = rect.shrink2(Vec2::new(0.0, 4.0));
-    let (fill, color, stroke) = match look {
-        Look::Solid { fill, text } => (fill, text, mix(fill, text, 0.35)),
-        _ => (mix(BUTTON, BG, 0.5), FAINT, STROKE),
-    };
-    ui.painter()
-        .rect(bar, 6.0, fill, Stroke::new(1.0_f32, stroke));
-    ui.painter().text(
-        bar.center(),
-        egui::Align2::CENTER_CENTER,
-        text,
-        FontId::proportional(11.5),
-        color,
-    );
+    let bar = rect.shrink2(Vec2::new(0.0, 3.0));
+    let font = FontId::proportional(11.5);
+    let p = ui.painter();
+    match look {
+        Look::Solid { fill, text: color } => {
+            p.rect(bar, 6.0, fill, Stroke::new(1.0_f32, mix(fill, color, 0.35)));
+            p.text(bar.center(), egui::Align2::CENTER_CENTER, text, font, color);
+        }
+        Look::Striped(a, b) => {
+            stripes(p, bar, 6.0, a, b);
+            p.rect_stroke(bar, 6.0, Stroke::new(1.0_f32, mix(STROKE, TEXT, 0.3)));
+            let galley = p.layout_no_wrap(text.to_string(), font, TEXT);
+            let pos = bar.center() - galley.size() / 2.0;
+            let back = egui::Rect::from_min_size(pos, galley.size()).expand2(Vec2::new(6.0, 0.0));
+            p.rect_filled(
+                back,
+                4.0,
+                Color32::from_rgba_unmultiplied(0x10, 0x14, 0x1B, 240),
+            );
+            p.galley(pos, galley, TEXT);
+        }
+        Look::Neutral => {
+            p.rect(bar, 6.0, mix(BUTTON, BG, 0.5), Stroke::new(1.0_f32, STROKE));
+            p.text(bar.center(), egui::Align2::CENTER_CENTER, text, font, FAINT);
+        }
+    }
 }
