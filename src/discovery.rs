@@ -35,7 +35,9 @@ impl Found {
         if !self.name.trim().is_empty() {
             self.name.trim().to_string()
         } else if !self.model.trim().is_empty() {
-            format!("{} {}", self.manufacturer.trim(), self.model.trim()).trim().to_string()
+            format!("{} {}", self.manufacturer.trim(), self.model.trim())
+                .trim()
+                .to_string()
         } else {
             format!("Projector {}", self.ip)
         }
@@ -64,7 +66,11 @@ impl Scan {
 /// Parse "192.168.10", "192.168.10.0/24" or "192.168.10.57" into a /24 prefix.
 pub fn parse_prefix(text: &str) -> Option<[u8; 3]> {
     let t = text.trim().split('/').next()?.trim().trim_end_matches('.');
-    let parts: Vec<u8> = t.split('.').map(|p| p.trim().parse::<u8>()).collect::<Result<_, _>>().ok()?;
+    let parts: Vec<u8> = t
+        .split('.')
+        .map(|p| p.trim().parse::<u8>())
+        .collect::<Result<_, _>>()
+        .ok()?;
     if parts.len() == 3 || parts.len() == 4 {
         Some([parts[0], parts[1], parts[2]])
     } else {
@@ -114,7 +120,9 @@ fn udp_search(wait: Duration) -> Vec<Ipv4Addr> {
     // answer to 4352, so prefer binding that when it is free.
     let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 4352))
         .or_else(|_| UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)));
-    let Ok(socket) = socket else { return Vec::new() };
+    let Ok(socket) = socket else {
+        return Vec::new();
+    };
     let _ = socket.set_broadcast(true);
     let _ = socket.set_read_timeout(Some(Duration::from_millis(250)));
     for addr in broadcast_addrs() {
@@ -204,7 +212,10 @@ pub fn start(extra: Vec<[u8; 3]>, repaint: Arc<dyn Fn() + Send + Sync>) -> Scan 
         total: Arc::new(AtomicUsize::new(prefixes.len() * 254)),
         running: Arc::new(AtomicBool::new(true)),
         subnets: Arc::new(Mutex::new(
-            prefixes.iter().map(|p| format!("{}.{}.{}.0/24", p[0], p[1], p[2])).collect(),
+            prefixes
+                .iter()
+                .map(|p| format!("{}.{}.{}.0/24", p[0], p[1], p[2]))
+                .collect(),
         )),
     };
 
@@ -251,11 +262,13 @@ pub fn start(extra: Vec<[u8; 3]>, repaint: Arc<dyn Fn() + Send + Sync>) -> Scan 
             let done = coordinator.done.clone();
             let repaint = repaint.clone();
             threads.push(std::thread::spawn(move || loop {
-                let Some(ip) = queue.lock().unwrap().pop() else { break };
+                let Some(ip) = queue.lock().unwrap().pop() else {
+                    break;
+                };
                 if let Some(f) = probe(ip) {
                     add(f);
                 }
-                if done.fetch_add(1, Ordering::Relaxed) % 16 == 0 {
+                if done.fetch_add(1, Ordering::Relaxed).is_multiple_of(16) {
                     repaint();
                 }
             }));

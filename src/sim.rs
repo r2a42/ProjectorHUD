@@ -132,8 +132,16 @@ pub fn spawn(spec: SimSpec) -> io::Result<SimHandle> {
 
     let stop = Arc::new(AtomicBool::new(false));
     let state = Arc::new(Mutex::new(State {
-        power: if spec.powered { Power::On } else { Power::Standby },
-        input: spec.inputs.first().map(|i| i.0.clone()).unwrap_or_else(|| "31".into()),
+        power: if spec.powered {
+            Power::On
+        } else {
+            Power::Standby
+        },
+        input: spec
+            .inputs
+            .first()
+            .map(|i| i.0.clone())
+            .unwrap_or_else(|| "31".into()),
         video_mute: false,
         audio_mute: false,
         freeze: false,
@@ -144,7 +152,11 @@ pub fn spawn(spec: SimSpec) -> io::Result<SimHandle> {
     if let Some(l) = nt_listener {
         accept_loop(l, stop.clone(), state, serve_ntcontrol);
     }
-    Ok(SimHandle { port, ntcontrol_port, stop })
+    Ok(SimHandle {
+        port,
+        ntcontrol_port,
+        stop,
+    })
 }
 
 fn accept_loop(
@@ -171,13 +183,17 @@ fn accept_loop(
 
 fn nonce() -> String {
     use std::hash::{BuildHasher, Hasher};
-    let h = std::collections::hash_map::RandomState::new().build_hasher().finish();
+    let h = std::collections::hash_map::RandomState::new()
+        .build_hasher()
+        .finish();
     format!("{:08x}", h as u32)
 }
 
 fn serve_pjlink(stream: TcpStream, state: Arc<Mutex<State>>, stop: Arc<AtomicBool>) {
     // Real projectors drop idle PJLink sessions after 30 seconds.
-    let Ok(mut conn) = LineConn::from_stream(stream, Duration::from_secs(30)) else { return };
+    let Ok(mut conn) = LineConn::from_stream(stream, Duration::from_secs(30)) else {
+        return;
+    };
     let password = state.lock().unwrap().spec.password.clone();
     let random = nonce();
     let mut expected = password.as_ref().map(|p| digest(&random, p));
@@ -189,7 +205,9 @@ fn serve_pjlink(stream: TcpStream, state: Arc<Mutex<State>>, stop: Arc<AtomicBoo
         return;
     }
     while !stop.load(Ordering::Relaxed) {
-        let Ok(mut line) = conn.read_line() else { return };
+        let Ok(mut line) = conn.read_line() else {
+            return;
+        };
         if let Some(d) = expected.take() {
             match line.strip_prefix(d.as_str()) {
                 Some(rest) => line = rest.to_string(),
@@ -231,7 +249,13 @@ fn pjlink_reply(line: &str, st: &mut State) -> String {
         ("POWR", "1") => if st.power_on() { "OK" } else { "ERR3" }.into(),
         ("POWR", "0") => if st.power_off() { "OK" } else { "ERR3" }.into(),
         ("POWR", _) => "ERR2".into(),
-        ("INPT", "?") => if on { st.input.clone() } else { "ERR3".into() },
+        ("INPT", "?") => {
+            if on {
+                st.input.clone()
+            } else {
+                "ERR3".into()
+            }
+        }
         ("INPT", code) => {
             if !on {
                 "ERR3".into()
@@ -260,12 +284,32 @@ fn pjlink_reply(line: &str, st: &mut State) -> String {
                 "ERR3".into()
             } else {
                 let ok = match p {
-                    "10" => { st.video_mute = false; true }
-                    "11" => { st.video_mute = true; true }
-                    "20" => { st.audio_mute = false; true }
-                    "21" => { st.audio_mute = true; true }
-                    "30" => { st.video_mute = false; st.audio_mute = false; true }
-                    "31" => { st.video_mute = true; st.audio_mute = true; true }
+                    "10" => {
+                        st.video_mute = false;
+                        true
+                    }
+                    "11" => {
+                        st.video_mute = true;
+                        true
+                    }
+                    "20" => {
+                        st.audio_mute = false;
+                        true
+                    }
+                    "21" => {
+                        st.audio_mute = true;
+                        true
+                    }
+                    "30" => {
+                        st.video_mute = false;
+                        st.audio_mute = false;
+                        true
+                    }
+                    "31" => {
+                        st.video_mute = true;
+                        st.audio_mute = true;
+                        true
+                    }
                     _ => false,
                 };
                 if ok { "OK" } else { "ERR2" }.into()
@@ -273,7 +317,13 @@ fn pjlink_reply(line: &str, st: &mut State) -> String {
         }
         ("ERST", "?") => st.spec.errors.iter().map(|d| d.to_string()).collect(),
         ("LAMP", "?") => format!("{} {}", st.spec.lamp_hours, on as u8),
-        ("INST", "?") => st.spec.inputs.iter().map(|i| i.0.clone()).collect::<Vec<_>>().join(" "),
+        ("INST", "?") => st
+            .spec
+            .inputs
+            .iter()
+            .map(|i| i.0.clone())
+            .collect::<Vec<_>>()
+            .join(" "),
         ("NAME", "?") => st.spec.name.clone(),
         ("INF1", "?") => st.spec.manufacturer.clone(),
         ("INF2", "?") => st.spec.model.clone(),
@@ -281,11 +331,22 @@ fn pjlink_reply(line: &str, st: &mut State) -> String {
         ("CLSS", "?") => st.spec.class.to_string(),
         ("SNUM", "?") => format!("SIM{:05}", st.spec.lamp_hours),
         ("SVER", "?") => "1.0.0".into(),
-        ("INNM", p) => match st.spec.inputs.iter().find(|i| Some(i.0.as_str()) == p.strip_prefix('?')) {
+        ("INNM", p) => match st
+            .spec
+            .inputs
+            .iter()
+            .find(|i| Some(i.0.as_str()) == p.strip_prefix('?'))
+        {
             Some(i) => i.1.clone(),
             None => "ERR2".into(),
         },
-        ("FREZ", "?") => if on { (st.freeze as u8).to_string() } else { "ERR3".into() },
+        ("FREZ", "?") => {
+            if on {
+                (st.freeze as u8).to_string()
+            } else {
+                "ERR3".into()
+            }
+        }
         ("FREZ", p @ ("0" | "1")) => {
             if on {
                 st.freeze = p == "1";
@@ -301,10 +362,14 @@ fn pjlink_reply(line: &str, st: &mut State) -> String {
 }
 
 fn serve_ntcontrol(stream: TcpStream, state: Arc<Mutex<State>>, _stop: Arc<AtomicBool>) {
-    let Ok(mut conn) = LineConn::from_stream(stream, Duration::from_secs(5)) else { return };
+    let Ok(mut conn) = LineConn::from_stream(stream, Duration::from_secs(5)) else {
+        return;
+    };
     let password = state.lock().unwrap().spec.password.clone();
     let random = nonce();
-    let expected = password.as_ref().map(|p| md5_hex(&format!("admin1:{p}:{random}")));
+    let expected = password
+        .as_ref()
+        .map(|p| md5_hex(&format!("admin1:{p}:{random}")));
     let greeting = match expected {
         Some(_) => format!("NTCONTROL 1 {random}\r"),
         None => "NTCONTROL 0\r".to_string(),
@@ -312,7 +377,9 @@ fn serve_ntcontrol(stream: TcpStream, state: Arc<Mutex<State>>, _stop: Arc<Atomi
     if conn.send(&greeting).is_err() {
         return;
     }
-    let Ok(mut line) = conn.read_line() else { return };
+    let Ok(mut line) = conn.read_line() else {
+        return;
+    };
     if let Some(d) = expected {
         match line.strip_prefix(d.as_str()) {
             Some(rest) => line = rest.to_string(),
@@ -327,7 +394,12 @@ fn serve_ntcontrol(stream: TcpStream, state: Arc<Mutex<State>>, _stop: Arc<Atomi
     st.tick();
     let on = st.power == Power::On;
     let reply: String = match body.as_str() {
-        "QPW" => if matches!(st.power, Power::On | Power::Warming(_)) { "001" } else { "000" }.into(),
+        "QPW" => if matches!(st.power, Power::On | Power::Warming(_)) {
+            "001"
+        } else {
+            "000"
+        }
+        .into(),
         "Q$S" => match st.power {
             Power::Standby => "0",
             Power::Warming(_) => "1",

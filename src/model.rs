@@ -106,7 +106,11 @@ impl Errors {
         ]
     }
     pub fn worst(&self) -> Severity {
-        self.items().iter().map(|(_, s)| *s).max().unwrap_or_default()
+        self.items()
+            .iter()
+            .map(|(_, s)| *s)
+            .max()
+            .unwrap_or_default()
     }
 }
 
@@ -179,12 +183,16 @@ impl ProjectorState {
                 }
             }
         }
-        out.sort_by(|a, b| b.1.cmp(&a.1));
+        out.sort_by_key(|issue| std::cmp::Reverse(issue.1));
         out
     }
 
     pub fn severity(&self) -> Severity {
-        self.issues().iter().map(|(_, s)| *s).max().unwrap_or_default()
+        self.issues()
+            .iter()
+            .map(|(_, s)| *s)
+            .max()
+            .unwrap_or_default()
     }
 }
 
@@ -249,7 +257,11 @@ impl From<std::io::Error> for DriverError {
 pub trait Driver: Send {
     /// Refresh `st` from the projector. `publish` may be called mid-poll so the
     /// UI sees power state before the slower queries complete.
-    fn poll(&mut self, st: &mut ProjectorState, publish: &dyn Fn(&ProjectorState)) -> Result<(), DriverError>;
+    fn poll(
+        &mut self,
+        st: &mut ProjectorState,
+        publish: &dyn Fn(&ProjectorState),
+    ) -> Result<(), DriverError>;
     fn command(&mut self, cmd: &Command) -> Result<(), DriverError>;
 }
 
@@ -282,7 +294,11 @@ impl Log {
         if q.len() >= Self::CAP {
             q.pop_front();
         }
-        q.push_back(LogEntry { time: chrono::Local::now(), kind, text: text.into() });
+        q.push_back(LogEntry {
+            time: chrono::Local::now(),
+            kind,
+            text: text.into(),
+        });
     }
     pub fn snapshot(&self) -> Vec<LogEntry> {
         self.0.lock().unwrap().iter().cloned().collect()
