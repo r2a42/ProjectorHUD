@@ -25,6 +25,8 @@ pub struct SimSpec {
     pub lamp_hours: u32,
     pub powered: bool,
     pub inputs: Vec<(String, String)>,
+    /// Like Panasonic: only AVMT 30/31 is accepted, 10/11/20/21 answer ERR2.
+    pub av_mute_only: bool,
     pub warm_up: Duration,
     pub cool_down: Duration,
 }
@@ -48,6 +50,7 @@ impl Default for SimSpec {
                 ("33".into(), "SDI".into()),
                 ("11".into(), "RGB".into()),
             ],
+            av_mute_only: false,
             warm_up: Duration::from_secs(6),
             cool_down: Duration::from_secs(8),
         }
@@ -282,6 +285,8 @@ fn pjlink_reply(line: &str, st: &mut State) -> String {
         ("AVMT", p) => {
             if !on {
                 "ERR3".into()
+            } else if st.spec.av_mute_only && !matches!(p, "30" | "31") {
+                "ERR2".into()
             } else {
                 let ok = match p {
                     "10" => {
@@ -441,6 +446,7 @@ pub fn demo_fleet() -> Vec<SimSpec> {
         SimSpec {
             name: "Main Stage Left".into(),
             manufacturer: "Panasonic".into(),
+            av_mute_only: true,
             model: "PT-RZ120".into(),
             port: 14352,
             powered: true,
@@ -451,6 +457,7 @@ pub fn demo_fleet() -> Vec<SimSpec> {
         SimSpec {
             name: "Main Stage Right".into(),
             manufacturer: "Panasonic".into(),
+            av_mute_only: true,
             model: "PT-RZ120".into(),
             port: 14353,
             powered: true,
@@ -461,6 +468,7 @@ pub fn demo_fleet() -> Vec<SimSpec> {
         SimSpec {
             name: "Rear Projection".into(),
             manufacturer: "Panasonic".into(),
+            av_mute_only: true,
             model: "PT-MZ880".into(),
             port: 14354,
             powered: true,

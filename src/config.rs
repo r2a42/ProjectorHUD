@@ -17,6 +17,37 @@ pub struct AppConfig {
     pub next_id: u64,
     #[serde(default)]
     pub demo: bool,
+    #[serde(default)]
+    pub sort: SortKey,
+}
+
+/// How projectors are ordered in the window.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SortKey {
+    #[default]
+    Name,
+    Address,
+    Type,
+}
+
+impl SortKey {
+    pub const ALL: [SortKey; 3] = [SortKey::Name, SortKey::Address, SortKey::Type];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SortKey::Name => "Name",
+            SortKey::Address => "IP address",
+            SortKey::Type => "Type",
+        }
+    }
+}
+
+/// Orders hosts so that 10.0.0.9 comes before 10.0.0.10, with host names after addresses.
+pub fn address_key(host: &str, port: u16) -> (u8, u32, String, u16) {
+    match host.trim().parse::<std::net::Ipv4Addr>() {
+        Ok(ip) => (0, u32::from(ip), String::new(), port),
+        Err(_) => (1, 0, host.trim().to_lowercase(), port),
+    }
 }
 
 impl AppConfig {
@@ -57,5 +88,20 @@ impl AppConfig {
     pub fn alloc_id(&mut self) -> u64 {
         self.next_id += 1;
         self.next_id
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn addresses_sort_numerically() {
+        let mut hosts = vec!["10.0.0.10", "projector.local", "10.0.0.9", "2.0.0.34"];
+        hosts.sort_by_key(|h| address_key(h, 4352));
+        assert_eq!(
+            hosts,
+            vec!["2.0.0.34", "10.0.0.9", "10.0.0.10", "projector.local"]
+        );
     }
 }

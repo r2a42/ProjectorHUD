@@ -140,6 +140,10 @@ pub struct PjLinkDriver {
     pending_digest: Option<String>,
     class: u8,
     static_loaded: bool,
+    /// The projector only has one "AV mute" (AVMT 30/31), which is its shutter,
+    /// and refuses the separate picture (10/11) and audio (20/21) forms.
+    /// Panasonic projectors work this way.
+    av_mute_only: bool,
 }
 
 impl PjLinkDriver {
@@ -153,6 +157,7 @@ impl PjLinkDriver {
             pending_digest: None,
             class: 1,
             static_loaded: false,
+            av_mute_only: false,
         }
     }
 
@@ -258,8 +263,44 @@ impl PjLinkDriver {
         })
     }
 
+    /// Close or open the shutter (picture mute). Projectors differ in which
+    /// AVMT form they accept, so if the expected one is refused the other is
+    /// tried, and whichever works is remembered.
+    fn shutter(&mut self, close: bool) -> Result<(), DriverError> {
+        let param = |av_only: bool| match (av_only, close) {
+            (true, true) => "31",
+            (true, false) => "30",
+            (false, true) => "11",
+            (false, false) => "10",
+        };
+        let first = self.exchange(1, "AVMT", param(self.av_mute_only))?;
+        if !matches!(first, Reply::OutOfParameter | Reply::Undefined) {
+            return reply_result(first);
+        }
+        let other = !self.av_mute_only;
+        let second = self.exchange(1, "AVMT", param(other))?;
+        if matches!(second, Reply::Value(_)) {
+            self.av_mute_only = other;
+            self.log.push(
+                LogKind::Info,
+                if other {
+                    "This projector uses a combined AV mute for its shutter"
+                } else {
+                    "This projector uses a separate picture mute for its shutter"
+                },
+            );
+        }
+        reply_result(second)
+    }
+
     fn set(&mut self, class: u8, cmd: &str, param: &str) -> Result<(), DriverError> {
-        match self.exchange(class, cmd, param)? {
+        reply_result(self.exchange(class, cmd, param)?)
+    }
+}
+
+fn reply_result(reply: Reply) -> Result<(), DriverError> {
+    {
+        match reply {
             Reply::Value(_) => Ok(()),
             Reply::Undefined => Err(DriverError::Protocol(
                 "Not supported by this projector".into(),
@@ -273,7 +314,9 @@ impl PjLinkDriver {
             Reply::Failure => Err(DriverError::Protocol("Projector reports a failure".into())),
         }
     }
+}
 
+impl PjLinkDriver {
     fn load_static(&mut self, st: &mut ProjectorState) -> Result<(), DriverError> {
         self.class = self
             .query(1, "CLSS")?
@@ -284,6 +327,10 @@ impl PjLinkDriver {
         st.class = self.class;
         st.device_name = self.query(1, "NAME")?.unwrap_or_default();
         st.manufacturer = self.query(1, "INF1")?.unwrap_or_default();
+        // Known up front for Panasonic; learned from a refusal for anything else.
+        if st.manufacturer.to_ascii_lowercase().contains("panasonic") {
+            self.av_mute_only = true;
+        }
         st.model = self.query(1, "INF2")?.unwrap_or_default();
         st.info = self.query(1, "INFO")?.unwrap_or_default();
 
@@ -354,7 +401,8 @@ impl Driver for PjLinkDriver {
             match self.query(1, "AVMT")?.and_then(|v| parse_avmt(&v)) {
                 Some((video, audio)) => {
                     st.video_mute = Some(video);
-                    st.audio_mute = Some(audio);
+                    // With a single AV mute there is no separate audio mute to show.
+                    st.audio_mute = if self.av_mute_only { None } else { Some(audio) };
                 }
                 None => {
                     st.video_mute = None;
@@ -378,8 +426,15 @@ impl Driver for PjLinkDriver {
         match cmd {
             Command::PowerOn => self.set(1, "POWR", "1"),
             Command::PowerOff => self.set(1, "POWR", "0"),
-            Command::VideoMute(on) => self.set(1, "AVMT", if *on { "11" } else { "10" }),
-            Command::AudioMute(on) => self.set(1, "AVMT", if *on { "21" } else { "20" }),
+            Command::VideoMute(on) => self.shutter(*on),
+            Command::AudioMute(on) => {
+                if self.av_mute_only {
+                    return Err(DriverError::Protocol(
+                        "This projector has no separate audio mute (its shutter mutes both)".into(),
+                    ));
+                }
+                self.set(1, "AVMT", if *on { "21" } else { "20" })
+            }
             Command::Input(code) => self.set(self.class, "INPT", code),
             Command::Freeze(on) => self.set(2, "FREZ", if *on { "1" } else { "0" }),
             Command::VolumeUp => self.set(2, "SVOL", "1"),
