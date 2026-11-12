@@ -4,7 +4,7 @@ mod dialogs;
 mod theme;
 
 use eframe::egui::{self, Align, Color32, Layout, RichText, Sense, Stroke, Vec2};
-use projectorhud::config::{address_key, AppConfig, SortKey};
+use projectorhud::config::{address_key, clamp_zoom, AppConfig, SortKey, ZOOM_MAX, ZOOM_MIN};
 use projectorhud::discovery::Scan;
 use projectorhud::model::*;
 use projectorhud::schedule::{self, LastRun, Schedule};
@@ -51,6 +51,7 @@ pub enum Act {
     StartRename(String),
     DeleteGroup(String),
     SetSort(SortKey),
+    SetZoom(f32),
     OpenScan,
     OpenSchedules,
     SetDemo(bool),
@@ -111,7 +112,9 @@ impl App {
         let ctx = cc.egui_ctx.clone();
         let repaint: Repaint = Arc::new(move || ctx.request_repaint());
 
-        let cfg = AppConfig::load();
+        let mut cfg = AppConfig::load();
+        cfg.zoom = clamp_zoom(cfg.zoom);
+        cc.egui_ctx.set_zoom_factor(cfg.zoom);
         let hub = Arc::new(Mutex::new(Hub::new(repaint.clone())));
         let schedules = Arc::new(Mutex::new(cfg.schedules.clone()));
         let last_run: LastRun = Arc::default();
@@ -396,6 +399,10 @@ impl App {
                 }
                 self.save();
             }
+            Act::SetZoom(z) => {
+                self.cfg.zoom = clamp_zoom(z);
+                self.save();
+            }
             Act::SetSort(key) => {
                 self.cfg.sort = key;
                 self.save();
@@ -447,6 +454,14 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Cmd/Ctrl with + - 0 zooms too; keep that and the buttons in step.
+        let seen = clamp_zoom(ctx.zoom_factor());
+        if (seen - self.cfg.zoom).abs() > 0.01 {
+            self.cfg.zoom = seen;
+            self.save();
+        }
+        let zoom_before = self.cfg.zoom;
+
         let items = self.hub.lock().unwrap().snapshot();
         self.selection
             .retain(|id| items.iter().any(|i| i.0.id == *id));
@@ -468,6 +483,9 @@ impl eframe::App for App {
 
         for act in acts {
             self.apply(act);
+        }
+        if (ctx.zoom_factor() - self.cfg.zoom).abs() > 0.001 || self.cfg.zoom != zoom_before {
+            ctx.set_zoom_factor(self.cfg.zoom);
         }
 
         // Keep the error pulse animating; otherwise tick slowly for timed messages.
@@ -867,17 +885,6 @@ impl App {
                                     scope: format!("all {} in {name}", members.len()),
                                 };
                                 self.grid(ui, Some(&head), &members, acts, &mut order);
-                                if members.is_empty() {
-                                    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 44.0), Sense::hover());
-                                    ui.painter().rect(rect, 10.0, Color32::TRANSPARENT, Stroke::new(1.0_f32, STROKE));
-                                    ui.painter().text(
-                                        rect.center(),
-                                        egui::Align2::CENTER_CENTER,
-                                        "Drag projectors here",
-                                        egui::FontId::proportional(13.0),
-                                        FAINT,
-                                    );
-                                }
                             });
                             let zone = inner.response.rect.expand2(Vec2::new(8.0, 6.0));
                             let (over, dropped) = drop_zone(ui, zone);
@@ -908,6 +915,19 @@ impl App {
                     acts.push(Act::SetSort(key));
                 }
             }
+
+            ui.add_space(14.0);
+            ui.label(small("Zoom"));
+            let z = self.cfg.zoom;
+            let step = |ui: &mut egui::Ui, text: &str, tip: &str, to: f32, enabled: bool, acts: &mut Vec<Act>| {
+                if toggle(ui, Vec2::new(26.0, 24.0), text, None, enabled).on_hover_text(tip).clicked() {
+                    acts.push(Act::SetZoom(to));
+                }
+            };
+            step(ui, "−", "Smaller: show more projectors (Cmd/Ctrl −)", z - 0.1, z > ZOOM_MIN + 0.01, acts);
+            let pct = format!("{:.0}%", z * 100.0);
+            step(ui, &pct, "Back to 100% (Cmd/Ctrl 0)", 1.0, (z - 1.0).abs() > 0.01, acts);
+            step(ui, "+", "Larger: show fewer projectors (Cmd/Ctrl +)", z + 0.1, z < ZOOM_MAX - 0.01, acts);
 
             if self.selection.len() < 2 {
                 ui.add_space(14.0);

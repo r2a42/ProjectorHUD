@@ -19,6 +19,22 @@ pub struct AppConfig {
     pub demo: bool,
     #[serde(default)]
     pub sort: SortKey,
+    /// Size of everything in the window; 1.0 is normal. Smaller shows more
+    /// projectors at once.
+    #[serde(default)]
+    pub zoom: f32,
+}
+
+pub const ZOOM_MIN: f32 = 0.5;
+pub const ZOOM_MAX: f32 = 1.6;
+
+/// A usable zoom from whatever was saved (older files have none).
+pub fn clamp_zoom(z: f32) -> f32 {
+    if z.is_finite() && z > 0.0 {
+        ((z * 10.0).round() / 10.0).clamp(ZOOM_MIN, ZOOM_MAX)
+    } else {
+        1.0
+    }
 }
 
 /// How projectors are ordered in the window.
