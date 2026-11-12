@@ -1,22 +1,107 @@
 name: CI
+
+# One run per change: pull requests are tested as they are updated, and `main`
+# is tested after a merge (the Cut release workflow needs CI to have passed on
+# its tip). A branch with no pull request isn't tested until it has one.
+# Changes that only touch documentation aren't tested; scripts/check_main_ci.sh
+# lets a release go ahead past such commits.
+#
+# A rebase merge makes new commits with the same files as the pull request's
+# last commit, so when that is all a push to `main` is (the same tree as a
+# pull request head that CI passed on) the `gate` job says so and the builds
+# are skipped; the run still counts as passed for the release check. Anything
+# else, such as a merge after `main` moved on, is tested in full.
 on:
   push:
     branches: [main]
+    paths-ignore: ["**.md", "LICENSE"]
   pull_request:
+    paths-ignore: ["**.md", "LICENSE"]
+
+# A newer push to a pull request replaces its run in progress. Runs on `main`
+# are never cancelled.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Nothing here writes to the repository: the builds get a read-only token (the
+# gate job asks for what it needs itself).
+permissions:
+  contents: read
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      tested: ${{ steps.same.outputs.tested }}
+    steps:
+      - id: same
+        name: Has this exact tree already passed CI in its pull request?
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          tested=false
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            tree="$(gh api "repos/$REPO/commits/$SHA" --jq .commit.tree.sha)"
+            for head in $(gh api "repos/$REPO/commits/$SHA/pulls" --jq '.[].head.sha' || true); do
+              [ "$(gh api "repos/$REPO/commits/$head" --jq .commit.tree.sha)" = "$tree" ] || continue
+              passed="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$head&event=pull_request&status=success&per_page=1" --jq .total_count)"
+              if [ "$passed" -ge 1 ]; then
+                echo "Tree $tree passed CI as $head in its pull request; not testing it again"
+                tested=true
+                break
+              fi
+            done
+          fi
+          echo "tested=$tested" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: gate
+    if: needs.gate.outputs.tested != 'true'
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Linux dependencies
+        with:
+          components: clippy, rustfmt
+
+      - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libgtk-3-dev
+        # A stalled package mirror must not hold the job for its whole timeout.
+        timeout-minutes: 10
+        run: |
+          # When the runner's own resolver can't find Ubuntu's archive, say which
+          # resolvers do and use public ones for the rest of the job.
+          if ! timeout 15 getent ahostsv4 azure.archive.ubuntu.com > /dev/null; then
+            echo "::warning::azure.archive.ubuntu.com does not resolve with the runner's DNS"
+            resolvectl status || true
+            for ns in 127.0.0.53 168.63.129.16 8.8.8.8 1.1.1.1; do
+              echo "== $ns"; timeout 10 dig +short +time=3 +tries=1 @"$ns" azure.archive.ubuntu.com A || true
+            done
+            sudo mkdir -p /etc/systemd/resolved.conf.d
+            printf '[Resolve]\nDNS=8.8.8.8 1.1.1.1\nDomains=~.\n' | sudo tee /etc/systemd/resolved.conf.d/public.conf
+            sudo systemctl restart systemd-resolved
+            timeout 15 getent ahostsv4 azure.archive.ubuntu.com || echo "::warning::still not resolving"
+          fi
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libgtk-3-dev
+
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --locked
-      - run: cargo build --release --locked
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      # The tests run the real drivers and worker threads over TCP against the
+      # built-in simulated projector.
+      - name: Test
+        run: cargo test --locked
