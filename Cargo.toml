@@ -1,0 +1,23 @@
+[package]
+name = "projectorhud"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Monitor and control a fleet of networked projectors (PJLink, Panasonic) from one window."
+repository = "https://github.com/r2a42/ProjectorHUD"
+default-run = "projectorhud"
+
+[dependencies]
+eframe = "0.29"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+md-5 = "0.10"
+chrono = "0.4"
+directories = "5"
+if-addrs = "0.13"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
