@@ -28,7 +28,6 @@ struct DragIds(Vec<u64>);
 /// Everything the UI can ask for. Collected during a frame, applied after it.
 pub enum Act {
     Send(u64, Command),
-    SendTarget(Target, Command),
     SendMany(Vec<u64>, Command),
     /// Show one projector (from the alert bar) or clear the selection.
     Select(Option<u64>),
@@ -250,9 +249,6 @@ impl App {
     fn apply(&mut self, act: Act) {
         match act {
             Act::Send(id, cmd) => self.hub.lock().unwrap().send(id, cmd),
-            Act::SendTarget(target, cmd) => {
-                self.hub.lock().unwrap().send_target(&target, cmd);
-            }
             Act::SendMany(ids, cmd) => {
                 let hub = self.hub.lock().unwrap();
                 for id in ids {
@@ -716,94 +712,90 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.add_space(8.0);
                     section(ui, "Groups");
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.add_space(14.0);
-                        ui.label(RichText::new("SHUTTERS").color(FAINT).size(11.0).strong());
-                    });
+
                 });
                 ui.add_space(4.0);
 
-                let all: Vec<&Item> = items.iter().collect();
-                let out = nav_row(ui, "All projectors", all.len(), worst(&all), self.view == Target::All, false, shutter_state(&all));
-                if out.resp.clicked() {
-                    acts.push(Act::View(Target::All));
-                }
-                if let Some(close) = out.shutter {
-                    acts.push(Act::SendTarget(Target::All, Command::VideoMute(close)));
-                }
-
-                for g in self.cfg.groups.clone() {
-                    // Renaming replaces the row with a text field.
-                    if let Some(r) = self.rename.as_mut().filter(|r| r.old == g) {
-                        let resp = ui.add(egui::TextEdit::singleline(&mut r.text).desired_width(f32::INFINITY));
-                        if r.focus {
-                            resp.request_focus();
-                            r.focus = false;
-                        }
-                        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                            self.rename = None;
-                        } else if resp.lost_focus() {
-                            acts.push(Act::RenameGroup(g.clone(), r.text.clone()));
-                            self.rename = None;
-                        }
-                        continue;
+                let footer = 64.0;
+                egui::ScrollArea::vertical().max_height(ui.available_height() - footer).auto_shrink([false, true]).show(ui, |ui| {
+                    let all: Vec<&Item> = items.iter().collect();
+                    let scope = format!("all {} projectors", all.len());
+                    let resp = nav_row(ui, "All projectors", &all, self.view == Target::All, false, &scope, acts);
+                    if resp.clicked() {
+                        acts.push(Act::View(Target::All));
                     }
 
-                    let members: Vec<&Item> = items.iter().filter(|i| i.0.group.as_deref() == Some(g.as_str())).collect();
-                    let next = ui.available_rect_before_wrap();
-                    let row_rect = egui::Rect::from_min_size(next.min, Vec2::new(next.width(), 34.0));
-                    let (over, dropped) = drop_zone(ui, row_rect);
-                    let out = nav_row(ui, &g, members.len(), worst(&members), self.view == Target::Group(g.clone()), over, shutter_state(&members));
-                    if let Some(ids) = dropped {
-                        acts.push(Act::MoveToGroup(ids, Some(g.clone())));
-                    }
-                    if out.resp.double_clicked() {
-                        acts.push(Act::StartRename(g.clone()));
-                    } else if out.resp.clicked() {
-                        acts.push(Act::View(Target::Group(g.clone())));
-                    }
-                    if let Some(close) = out.shutter {
-                        acts.push(Act::SendTarget(Target::Group(g.clone()), Command::VideoMute(close)));
-                    }
-                    out.resp.on_hover_text("Double-click to rename. Drop projectors here to move them.").context_menu(|ui| {
-                        if ui.button("Rename").clicked() {
+                    for g in self.cfg.groups.clone() {
+                        // Renaming replaces the row with a text field.
+                        if let Some(r) = self.rename.as_mut().filter(|r| r.old == g) {
+                            let resp = ui.add(egui::TextEdit::singleline(&mut r.text).desired_width(f32::INFINITY));
+                            if r.focus {
+                                resp.request_focus();
+                                r.focus = false;
+                            }
+                            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                                self.rename = None;
+                            } else if resp.lost_focus() {
+                                acts.push(Act::RenameGroup(g.clone(), r.text.clone()));
+                                self.rename = None;
+                            }
+                            continue;
+                        }
+
+                        let members: Vec<&Item> = items.iter().filter(|i| i.0.group.as_deref() == Some(g.as_str())).collect();
+                        let next = ui.available_rect_before_wrap();
+                        let row_rect = egui::Rect::from_min_size(next.min, Vec2::new(next.width(), NAV_H));
+                        let (over, dropped) = drop_zone(ui, row_rect);
+                        let scope = format!("all {} in {g}", members.len());
+                        let resp = nav_row(ui, &g, &members, self.view == Target::Group(g.clone()), over, &scope, acts);
+                        if let Some(ids) = dropped {
+                            acts.push(Act::MoveToGroup(ids, Some(g.clone())));
+                        }
+                        if resp.double_clicked() {
                             acts.push(Act::StartRename(g.clone()));
-                            ui.close_menu();
+                        } else if resp.clicked() {
+                            acts.push(Act::View(Target::Group(g.clone())));
                         }
-                        if ui.button(RichText::new("Delete group…").color(RED)).clicked() {
-                            acts.push(Act::Confirm(Confirm {
-                                title: format!("Delete group “{g}”?"),
-                                body: "Its projectors are kept and become ungrouped.".into(),
-                                button: "Delete group".into(),
-                                danger: true,
-                                act: Box::new(Act::DeleteGroup(g.clone())),
-                            }));
-                            ui.close_menu();
-                        }
-                    });
-                }
+                        resp.on_hover_text("Double-click to rename. Drop projectors here to move them.").context_menu(|ui| {
+                            if ui.button("Rename").clicked() {
+                                acts.push(Act::StartRename(g.clone()));
+                                ui.close_menu();
+                            }
+                            if ui.button(RichText::new("Delete group…").color(RED)).clicked() {
+                                acts.push(Act::Confirm(Confirm {
+                                    title: format!("Delete group “{g}”?"),
+                                    body: "Its projectors are kept and become ungrouped.".into(),
+                                    button: "Delete group".into(),
+                                    danger: true,
+                                    act: Box::new(Act::DeleteGroup(g.clone())),
+                                }));
+                                ui.close_menu();
+                            }
+                        });
+                    }
 
-                ui.add_space(6.0);
-                match &mut self.new_group {
-                    Some(name) => {
-                        let resp = ui.add(egui::TextEdit::singleline(name).hint_text("Group name").desired_width(f32::INFINITY));
-                        resp.request_focus();
-                        let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                        let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
-                        if enter {
-                            acts.push(Act::AddGroup(name.clone()));
+                    ui.add_space(6.0);
+                    match &mut self.new_group {
+                        Some(name) => {
+                            let resp = ui.add(egui::TextEdit::singleline(name).hint_text("Group name").desired_width(f32::INFINITY));
+                            resp.request_focus();
+                            let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                            if enter {
+                                acts.push(Act::AddGroup(name.clone()));
+                            }
+                            if enter || escape {
+                                self.new_group = None;
+                            }
+                            ui.label(small("Enter to create, Esc to cancel"));
                         }
-                        if enter || escape {
-                            self.new_group = None;
+                        None => {
+                            if ui.add(egui::Button::new(dim("➕  New group")).frame(false)).clicked() {
+                                self.new_group = Some(String::new());
+                            }
                         }
-                        ui.label(small("Enter to create, Esc to cancel"));
                     }
-                    None => {
-                        if ui.add(egui::Button::new(dim("➕  New group")).frame(false)).clicked() {
-                            self.new_group = Some(String::new());
-                        }
-                    }
-                }
+                });
 
                 ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
                     let mut demo = self.cfg.demo;
@@ -842,16 +834,8 @@ impl App {
                             Target::Group(g) => format!("all {n} in {g}"),
                             _ => format!("all {n} projectors"),
                         };
-                        let ids: Vec<u64> = visible.iter().map(|i| i.0.id).collect();
-                        ui.add_enabled_ui(n > 0, |ui| {
-                            let shutters = shutter_state(&visible);
-                            if let Some(close) = group_toggle(ui, Kind::Shutter, shutters, ("Close shutters", "Open shutters"), 0.0, 30.0, 14.0) {
-                                acts.push(Act::SendMany(ids.clone(), Command::VideoMute(close)));
-                            }
-                            let power = power_state(&visible);
-                            if let Some(on) = group_toggle(ui, Kind::Power, power, ("Power on all", "Power off all"), 0.0, 30.0, 14.0) {
-                                acts.push(power_many(ids.clone(), on, &scope));
-                            }
+                        ui.allocate_ui_with_layout(Vec2::new(STACK_W * 2.0 + 8.0, STACK_H), Layout::left_to_right(Align::Center), |ui| {
+                            ui.add_enabled_ui(n > 0, |ui| group_controls(ui, &visible, STACK_W, &scope, acts));
                         });
                     });
                 });
@@ -940,12 +924,7 @@ impl App {
                 let ids: Vec<u64> = self.selection.iter().copied().collect();
                 ui.label(RichText::new(format!("{n} selected")).color(ACCENT).strong());
                 let sel: Vec<&Item> = items.iter().filter(|i| self.selection.contains(&i.0.id)).collect();
-                if let Some(on) = group_toggle(ui, Kind::Power, power_state(&sel), ("Power on", "Power off"), 0.0, 24.0, 12.0) {
-                    acts.push(power_many(ids.clone(), on, &format!("the {n} selected projectors")));
-                }
-                if let Some(close) = group_toggle(ui, Kind::Shutter, shutter_state(&sel), ("Close shutters", "Open shutters"), 0.0, 24.0, 12.0) {
-                    acts.push(Act::SendMany(ids.clone(), Command::VideoMute(close)));
-                }
+                group_controls(ui, &sel, STACK_W, &format!("the {n} selected projectors"), acts);
                 ui.menu_button(RichText::new("Move to…").size(12.0), |ui| {
                     if ui.button("No group").clicked() {
                         acts.push(Act::MoveToGroup(ids.clone(), None));
@@ -981,7 +960,7 @@ impl App {
         acts: &mut Vec<Act>,
     ) {
         ui.horizontal(|ui| {
-            ui.set_height(28.0);
+            ui.set_height(STACK_H);
             let title = group.clone().unwrap_or_else(|| "Ungrouped".into());
             let text = RichText::new(title)
                 .size(16.0)
@@ -1004,21 +983,20 @@ impl App {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 ui.spacing_mut().button_padding = Vec2::new(10.0, 3.0);
-                ui.add_enabled_ui(!members.is_empty(), |ui| {
-                    let ids: Vec<u64> = members.iter().map(|i| i.0.id).collect();
-                    let shutters = shutter_state(members);
-                    if let Some(close) = group_toggle(
-                        ui,
-                        Kind::Shutter,
-                        shutters,
-                        ("Close shutters", "Open shutters"),
-                        0.0,
-                        24.0,
-                        12.0,
-                    ) {
-                        acts.push(Act::SendMany(ids, Command::VideoMute(close)));
-                    }
-                });
+                let scope = format!(
+                    "all {} in {}",
+                    members.len(),
+                    group.as_deref().unwrap_or("Ungrouped")
+                );
+                ui.allocate_ui_with_layout(
+                    Vec2::new(STACK_W * 2.0 + 8.0, STACK_H),
+                    Layout::left_to_right(Align::Center),
+                    |ui| {
+                        ui.add_enabled_ui(!members.is_empty(), |ui| {
+                            group_controls(ui, members, STACK_W, &scope, acts)
+                        });
+                    },
+                );
                 // A rule from the title to the buttons.
                 let rest = ui.available_rect_before_wrap();
                 if rest.width() > 16.0 {
@@ -1744,65 +1722,96 @@ enum Kind {
     Shutter,
 }
 
-/// The button (or pair) for a group. `labels` are (turn on / close, turn off / open).
-/// When every member is in the same state there is one button in that state's
-/// colour saying what it will do; a mixed group gets both, striped.
-/// Returns the state to put the group in: `Some(true)` = power on / close shutters.
-fn group_toggle(
-    ui: &mut egui::Ui,
-    kind: Kind,
-    state: Tri,
-    labels: (&str, &str),
-    each: f32,
-    height: f32,
-    font: f32,
-) -> Option<bool> {
-    let enabled = ui.is_enabled();
-    let (on_look, off_look) = match kind {
-        Kind::Power => (POWER_ON, POWER_OFF),
-        Kind::Shutter => (SHUTTER_CLOSED, SHUTTER_OPEN),
-    };
-    let single = if each > 0.0 {
-        each * 2.0 + ui.spacing().item_spacing.x
-    } else {
-        0.0
-    };
-    match state {
-        Tri::AllOn => state_button(
-            ui,
-            Vec2::new(single, height),
-            labels.1,
-            font,
-            on_look,
-            enabled,
-        )
-        .clicked()
-        .then_some(false),
-        Tri::AllOff => state_button(
-            ui,
-            Vec2::new(single, height),
-            labels.0,
-            font,
-            off_look,
-            enabled,
-        )
-        .clicked()
-        .then_some(true),
-        Tri::Mixed | Tri::Unknown => {
-            let look = if state == Tri::Mixed {
-                Look::striped(on_look, off_look)
-            } else {
-                Look::Neutral
+const STACK_W: f32 = 112.0;
+const STACK_BTN_H: f32 = 22.0;
+const STACK_H: f32 = STACK_BTN_H * 3.0;
+
+/// A group's control for power or for shutters: the "on" action above, the
+/// "off" action below, and the group's state between them (striped when its
+/// members differ). A button that would change nothing is greyed out.
+/// Returns the state to put the group in: `Some(true)` = power on / close.
+fn group_stack(ui: &mut egui::Ui, kind: Kind, state: Tri, width: f32) -> Option<bool> {
+    let mut out = None;
+    ui.allocate_ui_with_layout(
+        Vec2::new(width, STACK_H),
+        Layout::top_down(Align::Min),
+        |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let size = Vec2::new(width, STACK_BTN_H);
+            let known = state != Tri::Unknown && ui.is_enabled();
+            // `top_sets`: the state the upper button puts the group in.
+            let (top, bottom, top_sets, on_look, off_look, on_text, off_text) = match kind {
+                Kind::Power => (
+                    "Power on",
+                    "Power off",
+                    true,
+                    POWER_ON,
+                    POWER_OFF,
+                    "ON",
+                    "OFF",
+                ),
+                Kind::Shutter => (
+                    "Open shutters",
+                    "Close shutters",
+                    false,
+                    SHUTTER_CLOSED,
+                    SHUTTER_OPEN,
+                    "CLOSED",
+                    "OPEN",
+                ),
             };
-            let mut out = None;
-            if state_button(ui, Vec2::new(each, height), labels.0, font, look, enabled).clicked() {
-                out = Some(true);
+            let already = |v: bool| state == if v { Tri::AllOn } else { Tri::AllOff };
+            if state_button(
+                ui,
+                size,
+                top,
+                12.0,
+                Look::Neutral,
+                known && !already(top_sets),
+            )
+            .clicked()
+            {
+                out = Some(top_sets);
             }
-            if state_button(ui, Vec2::new(each, height), labels.1, font, look, enabled).clicked() {
-                out = Some(false);
+            let (text, look) = match state {
+                Tri::AllOn => (on_text, on_look),
+                Tri::AllOff => (off_text, off_look),
+                Tri::Mixed => ("MIXED", Look::striped(on_look, off_look)),
+                Tri::Unknown => ("—", Look::Neutral),
+            };
+            status_bar(ui, size, text, look);
+            if state_button(
+                ui,
+                size,
+                bottom,
+                12.0,
+                Look::Neutral,
+                known && !already(!top_sets),
+            )
+            .clicked()
+            {
+                out = Some(!top_sets);
             }
-            out
-        }
+        },
+    );
+    out
+}
+
+/// Power and shutter stacks, side by side, for a set of projectors.
+fn group_controls(
+    ui: &mut egui::Ui,
+    items: &[&Item],
+    width: f32,
+    scope: &str,
+    acts: &mut Vec<Act>,
+) {
+    let ids: Vec<u64> = items.iter().map(|i| i.0.id).collect();
+    ui.spacing_mut().item_spacing.x = 8.0;
+    if let Some(on) = group_stack(ui, Kind::Power, power_state(items), width) {
+        acts.push(power_many(ids.clone(), on, scope));
+    }
+    if let Some(close) = group_stack(ui, Kind::Shutter, shutter_state(items), width) {
+        acts.push(Act::SendMany(ids, Command::VideoMute(close)));
     }
 }
 
@@ -1854,29 +1863,22 @@ fn banner(ui: &mut egui::Ui, color: Color32, text: &str) {
         });
 }
 
-struct NavOut {
-    resp: egui::Response,
-    /// `Some(true)` = close shutters, `Some(false)` = open.
-    shutter: Option<bool>,
-}
+/// Height of one row of the left column: its name, then its controls.
+const NAV_H: f32 = 34.0 + STACK_H + 10.0;
 
-/// One row of the left column: a group name, its count, and shutter buttons.
+/// One row of the left column: a group's name and count, with its power and
+/// shutter controls underneath. Returns the response of the name strip.
 fn nav_row(
     ui: &mut egui::Ui,
     label: &str,
-    count: usize,
-    sev: Severity,
+    members: &[&Item],
     selected: bool,
     drop_hover: bool,
-    shutters: Tri,
-) -> NavOut {
-    const BTN_W: f32 = 42.0;
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), Sense::hover());
-    let buttons = egui::Rect::from_min_max(
-        egui::pos2(rect.right() - (BTN_W * 2.0 + 4.0) - 6.0, rect.top()),
-        egui::pos2(rect.right() - 6.0, rect.bottom()),
-    );
-    let main = egui::Rect::from_min_max(rect.min, egui::pos2(buttons.left() - 4.0, rect.bottom()));
+    scope: &str,
+    acts: &mut Vec<Act>,
+) -> egui::Response {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), NAV_H), Sense::hover());
+    let main = egui::Rect::from_min_size(rect.min, Vec2::new(rect.width(), 34.0));
     let resp = ui.interact(main, ui.id().with(("nav", label)), Sense::click());
 
     let fill = if selected {
@@ -1884,7 +1886,7 @@ fn nav_row(
     } else if resp.hovered() {
         CARD
     } else {
-        Color32::TRANSPARENT
+        mix(PANEL, CARD, 0.45)
     };
     let p = ui.painter();
     p.rect_filled(rect, 8.0, fill);
@@ -1896,49 +1898,48 @@ fn nav_row(
             Stroke::new(1.5_f32, ACCENT),
         );
     }
-    let mut right = main.right() - 4.0;
-    let count_galley = p.layout_no_wrap(count.to_string(), egui::FontId::proportional(12.0), DIM);
+    let mut right = main.right() - 12.0;
+    let count_galley = p.layout_no_wrap(
+        members.len().to_string(),
+        egui::FontId::proportional(12.0),
+        DIM,
+    );
     right -= count_galley.size().x;
     p.galley(
-        egui::pos2(right, rect.center().y - count_galley.size().y / 2.0),
+        egui::pos2(right, main.center().y - count_galley.size().y / 2.0),
         count_galley,
         DIM,
     );
+    let sev = worst(members);
     if sev != Severity::Ok {
         right -= 12.0;
-        p.circle_filled(egui::pos2(right, rect.center().y), 4.0, sev_color(sev));
+        p.circle_filled(egui::pos2(right, main.center().y), 4.0, sev_color(sev));
         right -= 6.0;
     }
-    let text_color = if selected { TEXT } else { mix(DIM, TEXT, 0.5) };
+    let text_color = if selected { TEXT } else { mix(DIM, TEXT, 0.6) };
     let galley = p.layout_no_wrap(
         label.to_string(),
         egui::FontId::proportional(14.0),
         text_color,
     );
-    let clip = egui::Rect::from_min_max(rect.min, egui::pos2(right - 8.0, rect.max.y));
-    let text_pos = egui::pos2(rect.left() + 12.0, rect.center().y - galley.size().y / 2.0);
+    let clip = egui::Rect::from_min_max(main.min, egui::pos2(right - 8.0, main.max.y));
+    let text_pos = egui::pos2(main.left() + 12.0, main.center().y - galley.size().y / 2.0);
     p.with_clip_rect(clip).galley(text_pos, galley, text_color);
 
-    let mut shutter = None;
+    let area = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + 10.0, main.bottom()),
+        egui::pos2(rect.right() - 10.0, rect.bottom() - 10.0),
+    );
     let mut child = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(buttons)
-            .layout(Layout::left_to_right(Align::Center)),
+            .max_rect(area)
+            .layout(Layout::left_to_right(Align::Min)),
     );
-    child.spacing_mut().item_spacing.x = 4.0;
-    child.spacing_mut().button_padding = Vec2::new(2.0, 2.0);
-    child.add_enabled_ui(count > 0, |ui| {
-        shutter = group_toggle(
-            ui,
-            Kind::Shutter,
-            shutters,
-            ("Close", "Open"),
-            BTN_W,
-            24.0,
-            12.0,
-        );
+    let w = ((area.width() - 8.0) / 2.0).floor();
+    child.add_enabled_ui(!members.is_empty(), |ui| {
+        group_controls(ui, members, w, scope, acts)
     });
-    NavOut { resp, shutter }
+    resp
 }
 
 fn welcome(ui: &mut egui::Ui, acts: &mut Vec<Act>) {
