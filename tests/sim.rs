@@ -215,7 +215,7 @@ fn worker_reports_offline_then_recovers() {
             std::thread::sleep(Duration::from_millis(50));
         }
     };
-    wait_for(Link::Offline, 5);
+    wait_for(Link::Offline, 12);
     assert!(handle.snapshot().link_error.is_some());
 
     let _sim = sim::spawn(SimSpec {
@@ -231,6 +231,51 @@ fn worker_reports_offline_then_recovers() {
         assert!(Instant::now() < deadline, "power never came on");
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+#[test]
+fn slow_start_is_not_reported_as_offline() {
+    // Nothing answers for the first moments after launch, then the projector
+    // is there. The operator must never be shown a fault for that.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let cfg = ProjectorConfig {
+        id: 1,
+        name: "W".into(),
+        host: "127.0.0.1".into(),
+        port,
+        protocol: Protocol::PjLink,
+        username: String::new(),
+        password: String::new(),
+        group: None,
+        demo: false,
+    };
+    let handle = worker::spawn(cfg, Arc::new(|| {}));
+    let watch = |until: Instant| {
+        while Instant::now() < until {
+            let st = handle.snapshot();
+            assert_ne!(st.link, Link::Offline, "false alarm at startup");
+            assert_eq!(st.severity(), Severity::Ok);
+            if st.link == Link::Online {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    };
+    assert!(!watch(Instant::now() + Duration::from_millis(1500)));
+    let _sim = sim::spawn(SimSpec {
+        port,
+        ..fast_spec()
+    })
+    .unwrap();
+    assert!(
+        watch(Instant::now() + worker::STARTUP_GRACE),
+        "never came online"
+    );
 }
 
 #[test]

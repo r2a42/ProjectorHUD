@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use theme::*;
 
 const CARD_MIN_W: f32 = 340.0;
-const CARD_H: f32 = 226.0;
+const CARD_H: f32 = 238.0;
 const GAP: f32 = 14.0;
 const DEMO_GROUP: &str = "Demo";
 
@@ -29,8 +29,10 @@ struct DragIds(Vec<u64>);
 pub enum Act {
     Send(u64, Command),
     SendMany(Vec<u64>, Command),
-    /// Show one projector (from the alert bar) or clear the selection.
+    /// Highlight one projector, or clear the highlight.
     Select(Option<u64>),
+    /// Open the details pane for one projector, or close it.
+    Detail(Option<u64>),
     /// A click on a card: `toggle` with Cmd/Ctrl, `range` with Shift.
     Click {
         id: u64,
@@ -76,8 +78,11 @@ pub struct App {
     repaint: Repaint,
     sims: Vec<SimHandle>,
     view: Target,
-    /// Highlighted projectors. With exactly one, its details are shown.
+    /// Highlighted projectors: what dragging and the bulk controls act on.
     selection: BTreeSet<u64>,
+    /// The projector in the details pane. Opened with a card's Details
+    /// button, and independent of what is highlighted.
+    detail: Option<u64>,
     /// Where a Shift-click range starts.
     anchor: Option<u64>,
     /// Cards in the order they were last drawn, for Shift-click ranges.
@@ -121,6 +126,7 @@ impl App {
             sims: Vec::new(),
             view: Target::All,
             selection: BTreeSet::new(),
+            detail: None,
             anchor: None,
             order: Vec::new(),
             confirm: None,
@@ -159,12 +165,12 @@ impl App {
         };
         match std::env::var("PROJECTORHUD_SHOT_VIEW").as_deref() {
             Ok("detail") => {
-                let id = by_name(&app, "Rehearsal");
-                app.selection.extend(id);
+                app.detail = by_name(&app, "Rehearsal");
             }
             Ok("multi") => {
                 let ids = [by_name(&app, "Left"), by_name(&app, "Right")];
                 app.selection.extend(ids.into_iter().flatten());
+                app.detail = by_name(&app, "Rehearsal");
             }
             Ok("schedules") => app.show_schedules = true,
             Ok("scan") => app.apply(Act::OpenScan),
@@ -237,15 +243,6 @@ impl App {
         self.save();
     }
 
-    /// The one projector whose details are shown, if exactly one is highlighted.
-    fn detail_id(&self) -> Option<u64> {
-        if self.selection.len() == 1 {
-            self.selection.iter().next().copied()
-        } else {
-            None
-        }
-    }
-
     fn apply(&mut self, act: Act) {
         match act {
             Act::Send(id, cmd) => self.hub.lock().unwrap().send(id, cmd),
@@ -260,6 +257,7 @@ impl App {
                 self.selection.extend(id);
                 self.anchor = id;
             }
+            Act::Detail(id) => self.detail = id,
             Act::Click { id, toggle, range } => {
                 if range {
                     let a = self
@@ -452,13 +450,14 @@ impl eframe::App for App {
         let items = self.hub.lock().unwrap().snapshot();
         self.selection
             .retain(|id| items.iter().any(|i| i.0.id == *id));
+        self.detail = self.detail.filter(|id| items.iter().any(|i| i.0.id == *id));
         let mut acts: Vec<Act> = Vec::new();
 
         self.top_bar(ctx, &items, &mut acts);
         self.alert_bar(ctx, &items, &mut acts);
         self.sidebar(ctx, &items, &mut acts);
         if let Some(item) = self
-            .detail_id()
+            .detail
             .and_then(|id| items.iter().find(|i| i.0.id == id))
         {
             self.detail_panel(ctx, item, &mut acts);
@@ -695,7 +694,7 @@ impl App {
                         );
                         if resp.on_hover_text("Show details").clicked() {
                             acts.push(Act::View(Target::All));
-                            acts.push(Act::Select(Some(cfg.id)));
+                            acts.push(Act::Detail(Some(cfg.id)));
                         }
                     }
                 });
@@ -756,22 +755,7 @@ impl App {
                         } else if resp.clicked() {
                             acts.push(Act::View(Target::Group(g.clone())));
                         }
-                        resp.on_hover_text("Double-click to rename. Drop projectors here to move them.").context_menu(|ui| {
-                            if ui.button("Rename").clicked() {
-                                acts.push(Act::StartRename(g.clone()));
-                                ui.close_menu();
-                            }
-                            if ui.button(RichText::new("Delete group…").color(RED)).clicked() {
-                                acts.push(Act::Confirm(Confirm {
-                                    title: format!("Delete group “{g}”?"),
-                                    body: "Its projectors are kept and become ungrouped.".into(),
-                                    button: "Delete group".into(),
-                                    danger: true,
-                                    act: Box::new(Act::DeleteGroup(g.clone())),
-                                }));
-                                ui.close_menu();
-                            }
-                        });
+                        resp.on_hover_text("Double-click to rename. Drop projectors here to move them.").context_menu(|ui| group_menu(ui, &g, acts));
                     }
 
                     ui.add_space(6.0);
@@ -834,8 +818,10 @@ impl App {
                             Target::Group(g) => format!("all {n} in {g}"),
                             _ => format!("all {n} projectors"),
                         };
-                        ui.allocate_ui_with_layout(Vec2::new(STACK_W * 2.0 + 8.0, STACK_H), Layout::left_to_right(Align::Center), |ui| {
-                            ui.add_enabled_ui(n > 0, |ui| group_controls(ui, &visible, STACK_W, &scope, acts));
+                        card_frame().show(ui, |ui| {
+                            ui.allocate_ui_with_layout(Vec2::new(STACK_W * 2.0 + 8.0, STACK_H), Layout::left_to_right(Align::Center), |ui| {
+                                ui.add_enabled_ui(n > 0, |ui| group_controls(ui, &visible, STACK_W, STACK_BTN_H, &scope, acts));
+                            });
                         });
                     });
                 });
@@ -855,7 +841,7 @@ impl App {
                                 ui.label(small("Drag projectors onto the group in the left column, or add a new one."));
                             });
                         }
-                        self.grid(ui, &visible, acts, &mut order);
+                        self.grid(ui, None, &visible, acts, &mut order);
                     } else {
                         let dragging = egui::DragAndDrop::has_payload_of_type::<DragIds>(ui.ctx());
                         let mut sections: Vec<Option<String>> = self.cfg.groups.iter().cloned().map(Some).collect();
@@ -873,7 +859,14 @@ impl App {
                                 .collect();
                             let inner = ui.scope(|ui| {
                                 ui.spacing_mut().item_spacing.y = 8.0;
-                                self.section_header(ui, &group, &members, acts);
+                                let name = group.as_deref().unwrap_or("Ungrouped");
+                                let head = Head {
+                                    title: name.to_string(),
+                                    group: group.clone(),
+                                    members: &members,
+                                    scope: format!("all {} in {name}", members.len()),
+                                };
+                                self.grid(ui, Some(&head), &members, acts, &mut order);
                                 if members.is_empty() {
                                     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 44.0), Sense::hover());
                                     ui.painter().rect(rect, 10.0, Color32::TRANSPARENT, Stroke::new(1.0_f32, STROKE));
@@ -884,8 +877,6 @@ impl App {
                                         egui::FontId::proportional(13.0),
                                         FAINT,
                                     );
-                                } else {
-                                    self.grid(ui, &members, acts, &mut order);
                                 }
                             });
                             let zone = inner.response.rect.expand2(Vec2::new(8.0, 6.0));
@@ -918,29 +909,8 @@ impl App {
                 }
             }
 
-            let n = self.selection.len();
-            ui.add_space(14.0);
-            if n > 1 {
-                let ids: Vec<u64> = self.selection.iter().copied().collect();
-                ui.label(RichText::new(format!("{n} selected")).color(ACCENT).strong());
-                let sel: Vec<&Item> = items.iter().filter(|i| self.selection.contains(&i.0.id)).collect();
-                group_controls(ui, &sel, STACK_W, &format!("the {n} selected projectors"), acts);
-                ui.menu_button(RichText::new("Move to…").size(12.0), |ui| {
-                    if ui.button("No group").clicked() {
-                        acts.push(Act::MoveToGroup(ids.clone(), None));
-                        ui.close_menu();
-                    }
-                    for g in &self.cfg.groups {
-                        if ui.button(g).clicked() {
-                            acts.push(Act::MoveToGroup(ids.clone(), Some(g.clone())));
-                            ui.close_menu();
-                        }
-                    }
-                });
-                if ui.add(egui::Button::new(small("Clear")).frame(false)).clicked() {
-                    acts.push(Act::Select(None));
-                }
-            } else {
+            if self.selection.len() < 2 {
+                ui.add_space(14.0);
                 ui.add(
                     egui::Label::new(
                         RichText::new("Cmd/Ctrl-click or Shift-click selects several. Drag to move between groups.").color(FAINT).size(12.0),
@@ -949,78 +919,95 @@ impl App {
                 );
             }
         });
+
+        // Several highlighted: their own card of controls, on its own row so
+        // it fits beside an open details pane.
+        let n = self.selection.len();
+        if n < 2 {
+            return;
+        }
+        let ids: Vec<u64> = self.selection.iter().copied().collect();
+        let sel: Vec<&Item> = items
+            .iter()
+            .filter(|i| self.selection.contains(&i.0.id))
+            .collect();
+        ui.add_space(4.0);
+        card_frame()
+            .stroke(Stroke::new(1.5_f32, ACCENT))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().button_padding = Vec2::new(10.0, 3.0);
+                    ui.label(
+                        RichText::new(format!("{n} selected"))
+                            .color(ACCENT)
+                            .strong(),
+                    );
+                    ui.add_space(6.0);
+                    group_controls(
+                        ui,
+                        &sel,
+                        STACK_W,
+                        STACK_BTN_H,
+                        &format!("the {n} selected projectors"),
+                        acts,
+                    );
+                    ui.add_space(6.0);
+                    ui.menu_button(RichText::new("Move to…").size(12.0), |ui| {
+                        if ui.button("No group").clicked() {
+                            acts.push(Act::MoveToGroup(ids.clone(), None));
+                            ui.close_menu();
+                        }
+                        for g in &self.cfg.groups {
+                            if ui.button(g).clicked() {
+                                acts.push(Act::MoveToGroup(ids.clone(), Some(g.clone())));
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                    if ui
+                        .button(RichText::new("Clear").size(12.0))
+                        .on_hover_text("Clear the selection")
+                        .clicked()
+                    {
+                        acts.push(Act::Select(None));
+                    }
+                });
+            });
     }
 
-    /// Subheading for one group inside "All projectors".
-    fn section_header(
+    /// Cards in rows. A group's own card, when given, leads its projectors.
+    fn grid(
         &self,
         ui: &mut egui::Ui,
-        group: &Option<String>,
-        members: &[&Item],
+        head: Option<&Head>,
+        items: &[&Item],
         acts: &mut Vec<Act>,
+        order: &mut Vec<u64>,
     ) {
-        ui.horizontal(|ui| {
-            ui.set_height(STACK_H);
-            let title = group.clone().unwrap_or_else(|| "Ungrouped".into());
-            let text = RichText::new(title)
-                .size(16.0)
-                .strong()
-                .color(mix(DIM, TEXT, 0.75));
-            let label = ui.add(egui::Label::new(text).sense(Sense::click()));
-            if let Some(g) = group {
-                if label
-                    .on_hover_text("Double-click to rename")
-                    .double_clicked()
-                {
-                    acts.push(Act::StartRename(g.clone()));
-                }
-            }
-            ui.label(dim(format!("{}", members.len())));
-            let sev = worst(members);
-            if sev != Severity::Ok {
-                dot(ui, sev_color(sev));
-            }
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                ui.spacing_mut().button_padding = Vec2::new(10.0, 3.0);
-                let scope = format!(
-                    "all {} in {}",
-                    members.len(),
-                    group.as_deref().unwrap_or("Ungrouped")
-                );
-                ui.allocate_ui_with_layout(
-                    Vec2::new(STACK_W * 2.0 + 8.0, STACK_H),
-                    Layout::left_to_right(Align::Center),
-                    |ui| {
-                        ui.add_enabled_ui(!members.is_empty(), |ui| {
-                            group_controls(ui, members, STACK_W, &scope, acts)
-                        });
-                    },
-                );
-                // A rule from the title to the buttons.
-                let rest = ui.available_rect_before_wrap();
-                if rest.width() > 16.0 {
-                    ui.painter().hline(
-                        (rest.left() + 6.0)..=(rest.right() - 10.0),
-                        rest.center().y,
-                        Stroke::new(1.0_f32, STROKE),
-                    );
-                }
-            });
-        });
-    }
-
-    fn grid(&self, ui: &mut egui::Ui, items: &[&Item], acts: &mut Vec<Act>, order: &mut Vec<u64>) {
+        enum Tile<'a> {
+            Head(&'a Head<'a>),
+            Projector(&'a Item),
+        }
+        let tiles: Vec<Tile> = head
+            .map(Tile::Head)
+            .into_iter()
+            .chain(items.iter().map(|i| Tile::Projector(i)))
+            .collect();
         let avail = ui.available_width();
         let cols = (((avail + GAP) / (CARD_MIN_W + GAP)).floor() as usize).max(1);
         let w = ((avail - GAP * (cols as f32 - 1.0)) / cols as f32).floor();
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing = Vec2::splat(GAP);
-            for row in items.chunks(cols) {
+            for row in tiles.chunks(cols) {
                 ui.horizontal(|ui| {
-                    for (cfg, st) in row.iter().map(|i| (&i.0, &i.1)) {
-                        order.push(cfg.id);
-                        self.card(ui, w, cfg, st, acts);
+                    for tile in row {
+                        match tile {
+                            Tile::Head(head) => group_card(ui, w, head, acts),
+                            Tile::Projector((cfg, st)) => {
+                                order.push(cfg.id);
+                                self.card(ui, w, cfg, st, acts);
+                            }
+                        }
                     }
                 });
             }
@@ -1159,8 +1146,38 @@ impl App {
                     });
                 },
             );
-            ui.add(egui::Label::new(small(subtitle(cfg, st))).truncate());
-            ui.add_space(6.0);
+            // Address and model, with the way into the details pane.
+            ui.allocate_ui_with_layout(
+                Vec2::new(ui.available_width(), 22.0),
+                Layout::right_to_left(Align::Center),
+                |ui| {
+                    ui.spacing_mut().button_padding = Vec2::new(8.0, 1.0);
+                    let open = self.detail == Some(cfg.id);
+                    let (fill, color) = if open {
+                        (mix(CARD, ACCENT, 0.35), TEXT)
+                    } else {
+                        (mix(CARD, TEXT, 0.08), mix(DIM, TEXT, 0.6))
+                    };
+                    let button =
+                        egui::Button::new(RichText::new("Details").size(12.0).color(color))
+                            .fill(fill)
+                            .stroke(Stroke::new(1.0_f32, STROKE))
+                            .rounding(6.0)
+                            .min_size(Vec2::new(58.0, 20.0));
+                    let tip = if open {
+                        "Close the details pane"
+                    } else {
+                        "Status, errors, lamp hours and the message log"
+                    };
+                    if ui.add(button).on_hover_text(tip).clicked() {
+                        acts.push(Act::Detail((!open).then_some(cfg.id)));
+                    }
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        ui.add(egui::Label::new(small(subtitle(cfg, st))).truncate());
+                    });
+                },
+            );
+            ui.add_space(2.0);
 
             // Input + lamp
             ui.horizontal(|ui| {
@@ -1285,7 +1302,7 @@ impl App {
                 ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 26.0), Layout::right_to_left(Align::Center), |ui| {
                     let close = egui::Button::new(RichText::new("×").size(20.0).color(DIM)).frame(false);
                     if ui.add(close).on_hover_text("Close").clicked() {
-                        acts.push(Act::Select(None));
+                        acts.push(Act::Detail(None));
                     }
                     pill(ui, power_label(st), power_color(st));
                     ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
@@ -1730,14 +1747,15 @@ const STACK_H: f32 = STACK_BTN_H * 3.0;
 /// "off" action below, and the group's state between them (striped when its
 /// members differ). A button that would change nothing is greyed out.
 /// Returns the state to put the group in: `Some(true)` = power on / close.
-fn group_stack(ui: &mut egui::Ui, kind: Kind, state: Tri, width: f32) -> Option<bool> {
+fn group_stack(ui: &mut egui::Ui, kind: Kind, state: Tri, width: f32, btn_h: f32) -> Option<bool> {
+    let font = if btn_h >= 28.0 { 13.0 } else { 12.0 };
     let mut out = None;
     ui.allocate_ui_with_layout(
-        Vec2::new(width, STACK_H),
+        Vec2::new(width, btn_h * 3.0),
         Layout::top_down(Align::Min),
         |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            let size = Vec2::new(width, STACK_BTN_H);
+            let size = Vec2::new(width, btn_h);
             let known = state != Tri::Unknown && ui.is_enabled();
             // `top_sets`: the state the upper button puts the group in.
             let (top, bottom, top_sets, on_look, off_look, on_text, off_text) = match kind {
@@ -1765,7 +1783,7 @@ fn group_stack(ui: &mut egui::Ui, kind: Kind, state: Tri, width: f32) -> Option<
                 ui,
                 size,
                 top,
-                12.0,
+                font,
                 Look::Neutral,
                 known && !already(top_sets),
             )
@@ -1784,7 +1802,7 @@ fn group_stack(ui: &mut egui::Ui, kind: Kind, state: Tri, width: f32) -> Option<
                 ui,
                 size,
                 bottom,
-                12.0,
+                font,
                 Look::Neutral,
                 known && !already(!top_sets),
             )
@@ -1802,15 +1820,16 @@ fn group_controls(
     ui: &mut egui::Ui,
     items: &[&Item],
     width: f32,
+    btn_h: f32,
     scope: &str,
     acts: &mut Vec<Act>,
 ) {
     let ids: Vec<u64> = items.iter().map(|i| i.0.id).collect();
     ui.spacing_mut().item_spacing.x = 8.0;
-    if let Some(on) = group_stack(ui, Kind::Power, power_state(items), width) {
+    if let Some(on) = group_stack(ui, Kind::Power, power_state(items), width, btn_h) {
         acts.push(power_many(ids.clone(), on, scope));
     }
-    if let Some(close) = group_stack(ui, Kind::Shutter, shutter_state(items), width) {
+    if let Some(close) = group_stack(ui, Kind::Shutter, shutter_state(items), width, btn_h) {
         acts.push(Act::SendMany(ids, Command::VideoMute(close)));
     }
 }
@@ -1937,9 +1956,166 @@ fn nav_row(
     );
     let w = ((area.width() - 8.0) / 2.0).floor();
     child.add_enabled_ui(!members.is_empty(), |ui| {
-        group_controls(ui, members, w, scope, acts)
+        group_controls(ui, members, w, STACK_BTN_H, scope, acts)
     });
     resp
+}
+
+/// The frame of a card, for controls that sit outside the grid.
+fn card_frame() -> egui::Frame {
+    egui::Frame::none()
+        .fill(CARD)
+        .stroke(Stroke::new(1.0_f32, STROKE))
+        .rounding(12.0)
+        .inner_margin(egui::Margin::same(10.0))
+}
+
+/// What a group's card shows and acts on.
+struct Head<'a> {
+    title: String,
+    /// The group it stands for; `None` for the ungrouped projectors.
+    group: Option<String>,
+    members: &'a [&'a Item],
+    /// How a confirmation names these projectors, e.g. "all 3 in Stage".
+    scope: String,
+}
+
+fn group_menu(ui: &mut egui::Ui, g: &str, acts: &mut Vec<Act>) {
+    if ui.button("Rename").clicked() {
+        acts.push(Act::StartRename(g.to_string()));
+        ui.close_menu();
+    }
+    if ui
+        .button(RichText::new("Delete group…").color(RED))
+        .clicked()
+    {
+        acts.push(Act::Confirm(Confirm {
+            title: format!("Delete group “{g}”?"),
+            body: "Its projectors are kept and become ungrouped.".into(),
+            button: "Delete group".into(),
+            danger: true,
+            act: Box::new(Act::DeleteGroup(g.to_string())),
+        }));
+        ui.close_menu();
+    }
+}
+
+/// A group's own card. It has the shape of a projector's card, with the power
+/// and shutter stacks in the same place, so a row reads the same way across.
+fn group_card(ui: &mut egui::Ui, w: f32, head: &Head, acts: &mut Vec<Act>) {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, CARD_H), Sense::click());
+    let members = head.members;
+    let fill = mix(CARD, ACCENT, if resp.hovered() { 0.13 } else { 0.09 });
+    ui.painter().rect(
+        rect,
+        12.0,
+        fill,
+        Stroke::new(1.0_f32, mix(STROKE, ACCENT, 0.55)),
+    );
+    if let Some(g) = &head.group {
+        if resp.double_clicked() {
+            acts.push(Act::StartRename(g.clone()));
+        }
+        resp.on_hover_text("Double-click to rename. Drop projectors here to move them.")
+            .context_menu(|ui| group_menu(ui, g, acts));
+    }
+
+    let inner = rect.shrink2(Vec2::new(16.0, 14.0));
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(inner)
+            .layout(Layout::top_down(Align::Min)),
+    );
+    {
+        let ui = &mut child;
+        ui.spacing_mut().item_spacing = Vec2::new(8.0, 4.0);
+        ui.allocate_ui_with_layout(
+            Vec2::new(ui.available_width(), 22.0),
+            Layout::right_to_left(Align::Center),
+            |ui| {
+                pill(ui, "GROUP", ACCENT);
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    ui.add(
+                        egui::Label::new(RichText::new(&head.title).size(16.0).strong()).truncate(),
+                    );
+                });
+            },
+        );
+
+        let n = members.len();
+        let count =
+            |f: &dyn Fn(&ProjectorState) -> bool| members.iter().filter(|i| f(&i.1)).count();
+        let on = count(&|s| s.link == Link::Online && s.power == Power::On);
+        let checking = count(&|s| s.link == Link::Connecting);
+        let troubled = count(&|s| s.severity() != Severity::Ok);
+        let noun = if n == 1 { "projector" } else { "projectors" };
+        ui.allocate_ui_with_layout(
+            Vec2::new(ui.available_width(), 22.0),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                let text = if n == 0 {
+                    "No projectors yet".to_string()
+                } else {
+                    format!("{n} {noun}  ·  {on} on")
+                };
+                ui.add(egui::Label::new(small(text)).truncate());
+            },
+        );
+        ui.add_space(2.0);
+        ui.allocate_ui_with_layout(
+            Vec2::new(ui.available_width(), 28.0),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                ui.add(
+                    egui::Label::new(dim(if head.group.is_some() {
+                        "Controls every projector in this group"
+                    } else {
+                        "Controls every ungrouped projector"
+                    }))
+                    .truncate(),
+                );
+            },
+        );
+        ui.allocate_ui_with_layout(
+            Vec2::new(ui.available_width(), 18.0),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                let sev = worst(members);
+                let (text, color) = if troubled > 0 {
+                    let verb = if troubled == 1 { "needs" } else { "need" };
+                    (format!("⚠  {troubled} {verb} attention"), sev_color(sev))
+                } else if n == 0 {
+                    ("Drag projectors here".to_string(), FAINT)
+                } else if checking > 0 {
+                    ("Checking…".to_string(), FAINT)
+                } else {
+                    ("✔  No errors".to_string(), GREEN)
+                };
+                let mut rich = RichText::new(text).color(color).size(13.0);
+                if troubled > 0 {
+                    rich = rich.strong();
+                }
+                ui.add(egui::Label::new(rich).truncate());
+            },
+        );
+
+        // The same columns as a projector's power and shutter stacks.
+        let bottom = egui::Rect::from_min_max(
+            egui::pos2(inner.left(), inner.bottom() - CONTROLS_H),
+            inner.right_bottom(),
+        );
+        let mut row = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(bottom)
+                .layout(Layout::left_to_right(Align::Min)),
+        );
+        row.spacing_mut().button_padding = Vec2::new(4.0, 4.0);
+        let side = 66.0_f32.min(inner.width() * 0.22);
+        let col = ((inner.width() - side - 16.0) / 2.0).floor();
+        row.add_enabled_ui(n > 0, |ui| {
+            group_controls(ui, members, col, CONTROLS_H / 3.0, &head.scope, acts)
+        });
+    }
 }
 
 fn welcome(ui: &mut egui::Ui, acts: &mut Vec<Act>) {
