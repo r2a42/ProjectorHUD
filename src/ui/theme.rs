@@ -326,3 +326,22 @@ pub fn state_button(
     p.galley(text_pos, galley, text_color);
     resp
 }
+
+/// The present state, shown between the two buttons that change it.
+pub fn status_bar(ui: &mut Ui, size: Vec2, text: &str, look: Look) {
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let bar = rect.shrink2(Vec2::new(0.0, 4.0));
+    let (fill, color, stroke) = match look {
+        Look::Solid { fill, text } => (fill, text, mix(fill, text, 0.35)),
+        _ => (mix(BUTTON, BG, 0.5), FAINT, STROKE),
+    };
+    ui.painter()
+        .rect(bar, 6.0, fill, Stroke::new(1.0_f32, stroke));
+    ui.painter().text(
+        bar.center(),
+        egui::Align2::CENTER_CENTER,
+        text,
+        FontId::proportional(11.5),
+        color,
+    );
+}

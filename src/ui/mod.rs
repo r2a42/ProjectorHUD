@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use theme::*;
 
 const CARD_MIN_W: f32 = 340.0;
-const CARD_H: f32 = 172.0;
+const CARD_H: f32 = 226.0;
 const GAP: f32 = 14.0;
 const DEMO_GROUP: &str = "Demo";
 
@@ -1281,7 +1281,7 @@ impl App {
 
             // Controls pinned to the bottom edge
             let bottom = egui::Rect::from_min_max(
-                egui::pos2(inner.left(), inner.bottom() - 30.0),
+                egui::pos2(inner.left(), inner.bottom() - CONTROLS_H),
                 inner.right_bottom(),
             );
             let mut row = ui.new_child(
@@ -1291,7 +1291,7 @@ impl App {
             );
             row.spacing_mut().item_spacing.x = 6.0;
             row.spacing_mut().button_padding = Vec2::new(4.0, 4.0);
-            control_buttons(&mut row, inner.width(), 30.0, cfg, st, acts);
+            control_buttons(&mut row, inner.width(), cfg, st, acts);
         }
     }
 
@@ -1335,7 +1335,7 @@ impl App {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         ui.spacing_mut().button_padding = Vec2::new(4.0, 4.0);
                         let w = ui.available_width();
-                        control_buttons(ui, w, 34.0, cfg, st, acts);
+                        control_buttons(ui, w, cfg, st, acts);
                     });
                     let on = st.link == Link::Online && st.power == Power::On;
                     if on && st.class >= 2 {
@@ -1509,115 +1509,187 @@ fn remove_confirm(cfg: &ProjectorConfig) -> Act {
     })
 }
 
-/// Power / Shutter / Mute / Freeze, shared by cards and the detail panel.
-/// Power and shutter are coloured by their present state and labelled with
-/// what a click will do.
+/// Height of the control block on a card: button, status, button.
+const CONTROLS_H: f32 = 84.0;
+
+/// The controls for one projector. Power and shutter each get a stack: the
+/// "on" action above, the "off" action below, and the present state between
+/// them, so both actions are always in the same place. Whichever would do
+/// nothing is greyed out. Mute and freeze sit in a third, narrower stack.
 fn control_buttons(
     ui: &mut egui::Ui,
     width: f32,
-    height: f32,
     cfg: &ProjectorConfig,
     st: &ProjectorState,
     acts: &mut Vec<Act>,
 ) {
+    const BTN_H: f32 = 28.0;
+    const GAP: f32 = 8.0;
     let online = st.link == Link::Online;
     let on = online && st.power == Power::On;
-    let usable = width - ui.spacing().item_spacing.x * 3.0;
-    let wide = (usable * 0.31).floor();
-    let narrow = ((usable - wide * 2.0) / 2.0).floor();
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, CONTROLS_H), Sense::hover());
+    let side = 66.0_f32.min(width * 0.22);
+    let col = ((width - side - GAP * 2.0) / 2.0).floor();
+    let column = |ui: &mut egui::Ui, x: f32, w: f32| {
+        let r = egui::Rect::from_min_size(
+            egui::pos2(rect.left() + x, rect.top()),
+            Vec2::new(w, CONTROLS_H),
+        );
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(r)
+                .layout(Layout::top_down(Align::Min)),
+        );
+        child.spacing_mut().item_spacing.y = 0.0;
+        child
+    };
+    let status_h = CONTROLS_H - BTN_H * 2.0;
 
-    let (label, look, enabled, tip) = match st.power {
-        _ if !online => ("Power", Look::Neutral, false, "Not reachable"),
-        Power::Standby => (
+    // Power
+    {
+        let mut ui = column(ui, 0.0, col);
+        let size = Vec2::new(col, BTN_H);
+        let r = state_button(
+            &mut ui,
+            size,
             "Power on",
-            POWER_OFF,
-            true,
-            "The projector is off. Click to power it on.",
-        ),
-        Power::On => (
-            "Power off",
-            POWER_ON,
-            true,
-            "The projector is on. Click to power it off.",
-        ),
-        Power::Warming => ("Warming…", Look::Neutral, false, "Warming up"),
-        Power::Cooling => ("Cooling…", Look::Neutral, false, "Cooling down"),
-        Power::Unknown => ("Power", Look::Neutral, false, "Power state unknown"),
-    };
-    let r = state_button(ui, Vec2::new(wide, height), label, 13.0, look, enabled);
-    if r.on_hover_text(tip).on_disabled_hover_text(tip).clicked() {
-        acts.push(if st.power == Power::On {
-            power_off_confirm(cfg)
-        } else {
-            Act::Send(cfg.id, Command::PowerOn)
-        });
-    }
-
-    let (label, look, enabled, tip) = match st.video_mute {
-        Some(true) if on => (
-            "Open shutter",
-            SHUTTER_CLOSED,
-            true,
-            "The shutter is closed. Click to open it.",
-        ),
-        Some(false) if on => (
-            "Close shutter",
-            SHUTTER_OPEN,
-            true,
-            "The shutter is open. Click to close it.",
-        ),
-        _ => (
-            "Shutter",
+            13.0,
             Look::Neutral,
-            false,
-            "Available when the projector is on",
-        ),
-    };
-    let r = state_button(ui, Vec2::new(wide, height), label, 13.0, look, enabled);
-    if r.on_hover_text(tip).on_disabled_hover_text(tip).clicked() {
-        acts.push(Act::Send(
-            cfg.id,
-            Command::VideoMute(st.video_mute != Some(true)),
-        ));
+            online && st.power == Power::Standby,
+        );
+        if r.on_disabled_hover_text("Available when the projector is in standby")
+            .clicked()
+        {
+            acts.push(Act::Send(cfg.id, Command::PowerOn));
+        }
+        let (text, look) = match st.power {
+            _ if !online => ("—", Look::Neutral),
+            Power::On => ("ON", POWER_ON),
+            Power::Standby => ("OFF", POWER_OFF),
+            Power::Warming => (
+                "WARMING",
+                Look::Solid {
+                    fill: AMBER,
+                    text: Color32::from_rgb(0x08, 0x0B, 0x10),
+                },
+            ),
+            Power::Cooling => (
+                "COOLING",
+                Look::Solid {
+                    fill: COOL,
+                    text: Color32::from_rgb(0x08, 0x0B, 0x10),
+                },
+            ),
+            Power::Unknown => ("—", Look::Neutral),
+        };
+        status_bar(&mut ui, Vec2::new(col, status_h), text, look);
+        let r = state_button(&mut ui, size, "Power off", 13.0, Look::Neutral, on);
+        if r.on_disabled_hover_text("Available when the projector is on")
+            .clicked()
+        {
+            acts.push(power_off_confirm(cfg));
+        }
     }
 
-    let size = Vec2::new(narrow, height);
-    let muted = st.audio_mute == Some(true);
-    let r = toggle(
-        ui,
-        size,
-        "Mute",
-        muted.then_some(AMBER),
-        on && st.audio_mute.is_some(),
-    );
-    if r.on_hover_text(if muted {
-        "Audio is muted. Click to unmute."
-    } else {
-        "Mute audio"
-    })
-    .on_disabled_hover_text("This projector has no separate audio mute, or is not powered on")
-    .clicked()
+    // Shutter
     {
-        acts.push(Act::Send(cfg.id, Command::AudioMute(!muted)));
+        let mut ui = column(ui, col + GAP, col);
+        let size = Vec2::new(col, BTN_H);
+        let state = if on { st.video_mute } else { None };
+        let r = state_button(
+            &mut ui,
+            size,
+            "Open shutter",
+            13.0,
+            Look::Neutral,
+            state == Some(true),
+        );
+        if r.on_disabled_hover_text("Available when the shutter is closed")
+            .clicked()
+        {
+            acts.push(Act::Send(cfg.id, Command::VideoMute(false)));
+        }
+        let (text, look) = match state {
+            Some(false) => ("OPEN", SHUTTER_OPEN),
+            Some(true) => ("CLOSED", SHUTTER_CLOSED),
+            None => ("—", Look::Neutral),
+        };
+        status_bar(&mut ui, Vec2::new(col, status_h), text, look);
+        let r = state_button(
+            &mut ui,
+            size,
+            "Close shutter",
+            13.0,
+            Look::Neutral,
+            state == Some(false),
+        );
+        if r.on_disabled_hover_text("Available when the projector is on and the shutter is open")
+            .clicked()
+        {
+            acts.push(Act::Send(cfg.id, Command::VideoMute(true)));
+        }
     }
 
-    let frozen = st.freeze == Some(true);
-    let r = toggle(
-        ui,
-        size,
-        "Freeze",
-        frozen.then_some(COOL),
-        on && st.freeze.is_some(),
-    );
-    if r.on_hover_text(if frozen {
-        "Picture is frozen. Click to resume."
-    } else {
-        "Freeze the picture"
-    })
-    .on_disabled_hover_text("Needs PJLink Class 2 and the projector powered on")
-    .clicked()
+    // Mute and freeze
     {
-        acts.push(Act::Send(cfg.id, Command::Freeze(!frozen)));
+        let mut ui = column(ui, (col + GAP) * 2.0, side);
+        let size = Vec2::new(side, BTN_H);
+        let ink = Color32::from_rgb(0x08, 0x0B, 0x10);
+        let muted = st.audio_mute == Some(true);
+        let look = if muted {
+            Look::Solid {
+                fill: AMBER,
+                text: ink,
+            }
+        } else {
+            Look::Neutral
+        };
+        let r = state_button(
+            &mut ui,
+            size,
+            "Mute",
+            13.0,
+            look,
+            on && st.audio_mute.is_some(),
+        );
+        if r.on_hover_text(if muted {
+            "Audio is muted. Click to unmute."
+        } else {
+            "Mute audio"
+        })
+        .on_disabled_hover_text("This projector has no separate audio mute, or is not powered on")
+        .clicked()
+        {
+            acts.push(Act::Send(cfg.id, Command::AudioMute(!muted)));
+        }
+        ui.add_space(status_h);
+        let frozen = st.freeze == Some(true);
+        let look = if frozen {
+            Look::Solid {
+                fill: COOL,
+                text: ink,
+            }
+        } else {
+            Look::Neutral
+        };
+        let r = state_button(
+            &mut ui,
+            size,
+            "Freeze",
+            13.0,
+            look,
+            on && st.freeze.is_some(),
+        );
+        if r.on_hover_text(if frozen {
+            "Picture is frozen. Click to resume."
+        } else {
+            "Freeze the picture"
+        })
+        .on_disabled_hover_text("Needs PJLink Class 2 and the projector powered on")
+        .clicked()
+        {
+            acts.push(Act::Send(cfg.id, Command::Freeze(!frozen)));
+        }
     }
 }
 
