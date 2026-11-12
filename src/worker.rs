@@ -46,9 +46,13 @@ impl Drop for Handle {
 pub fn make_driver(cfg: &ProjectorConfig, log: Log) -> Box<dyn Driver> {
     match cfg.protocol {
         Protocol::PjLink => Box::new(PjLinkDriver::new(&cfg.host, cfg.port, &cfg.password, log)),
-        Protocol::Panasonic => {
-            Box::new(PanasonicDriver::new(&cfg.host, cfg.port, &cfg.username, &cfg.password, log))
-        }
+        Protocol::Panasonic => Box::new(PanasonicDriver::new(
+            &cfg.host,
+            cfg.port,
+            &cfg.username,
+            &cfg.password,
+            log,
+        )),
     }
 }
 
@@ -142,7 +146,12 @@ pub fn spawn(cfg: ProjectorConfig, repaint: Repaint) -> Handle {
         })
         .expect("spawn projector worker");
 
-    Handle { cfg, state, log, tx }
+    Handle {
+        cfg,
+        state,
+        log,
+        tx,
+    }
 }
 
 /// Who a group action or schedule applies to.
@@ -171,7 +180,10 @@ pub struct Hub {
 
 impl Hub {
     pub fn new(repaint: Repaint) -> Self {
-        Self { handles: Vec::new(), repaint }
+        Self {
+            handles: Vec::new(),
+            repaint,
+        }
     }
 
     /// Start (or restart, if the config changed) the worker for `cfg`.
@@ -216,6 +228,9 @@ impl Hub {
     }
 
     pub fn snapshot(&self) -> Vec<(ProjectorConfig, ProjectorState)> {
-        self.handles.iter().map(|h| (h.cfg.clone(), h.snapshot())).collect()
+        self.handles
+            .iter()
+            .map(|h| (h.cfg.clone(), h.snapshot()))
+            .collect()
     }
 }

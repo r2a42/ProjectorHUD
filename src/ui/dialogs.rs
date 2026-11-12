@@ -61,7 +61,11 @@ impl Editor {
             host: f.ip.to_string(),
             port: f.port.to_string(),
             protocol: f.protocol,
-            username: if f.protocol == Protocol::Panasonic { "admin1".into() } else { String::new() },
+            username: if f.protocol == Protocol::Panasonic {
+                "admin1".into()
+            } else {
+                String::new()
+            },
             error: Some("This projector needs a password.".into()),
             focus: false,
             ..Self::new(group)
@@ -73,11 +77,19 @@ impl Editor {
         if host.is_empty() {
             return Err("Enter the projector's IP address or host name.".into());
         }
-        let port: u16 = self.port.trim().parse().map_err(|_| "Port must be a number from 1 to 65535.".to_string())?;
+        let port: u16 = self
+            .port
+            .trim()
+            .parse()
+            .map_err(|_| "Port must be a number from 1 to 65535.".to_string())?;
         if port == 0 {
             return Err("Port must be a number from 1 to 65535.".into());
         }
-        let name = if self.name.trim().is_empty() { host.to_string() } else { self.name.trim().to_string() };
+        let name = if self.name.trim().is_empty() {
+            host.to_string()
+        } else {
+            self.name.trim().to_string()
+        };
         Ok(ProjectorConfig {
             id: self.id,
             name,
@@ -156,7 +168,11 @@ impl App {
         let Some(ed) = &mut self.editor else { return };
         let mut close = false;
         let mut submit = false;
-        let title = if ed.id == 0 { "Add projector" } else { "Edit projector" };
+        let title = if ed.id == 0 {
+            "Add projector"
+        } else {
+            "Edit projector"
+        };
         dialog(title).show(ctx, |ui| {
             ui.set_width(400.0);
             egui::Grid::new("editor").num_columns(2).spacing([14.0, 10.0]).show(ui, |ui| {
@@ -263,7 +279,11 @@ impl App {
             Target::Group(g) => Some(g.clone()),
             _ => None,
         };
-        let known = |f: &Found| items.iter().any(|i| i.0.host == f.ip.to_string() && i.0.protocol == f.protocol);
+        let known = |f: &Found| {
+            items
+                .iter()
+                .any(|i| i.0.host == f.ip.to_string() && i.0.protocol == f.protocol)
+        };
 
         dialog("Discover projectors").open(&mut open).show(ctx, |ui| {
             ui.set_width(520.0);
@@ -350,10 +370,16 @@ impl App {
         });
 
         if rescan {
-            let extra = discovery::parse_prefix(&self.scan_subnet).into_iter().collect();
+            let extra = discovery::parse_prefix(&self.scan_subnet)
+                .into_iter()
+                .collect();
             self.scan = Some(discovery::start(extra, self.repaint.clone()));
         }
-        if !open || (self.editor.is_none() && self.confirm.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Escape))) {
+        if !open
+            || (self.editor.is_none()
+                && self.confirm.is_none()
+                && ctx.input(|i| i.key_pressed(egui::Key::Escape)))
+        {
             self.show_scan = false;
             self.scan = None;
         }
@@ -369,10 +395,23 @@ impl App {
         let mut delete: Option<u64> = None;
 
         let mut targets: Vec<(Target, String)> = vec![(Target::All, "All projectors".into())];
-        targets.extend(self.cfg.groups.iter().map(|g| (Target::Group(g.clone()), format!("Group: {g}"))));
-        targets.extend(items.iter().map(|i| (Target::Projector(i.0.id), i.0.name.clone())));
+        targets.extend(
+            self.cfg
+                .groups
+                .iter()
+                .map(|g| (Target::Group(g.clone()), format!("Group: {g}"))),
+        );
+        targets.extend(
+            items
+                .iter()
+                .map(|i| (Target::Projector(i.0.id), i.0.name.clone())),
+        );
         let target_label = |t: &Target| {
-            targets.iter().find(|x| &x.0 == t).map(|x| x.1.clone()).unwrap_or_else(|| "(removed)".into())
+            targets
+                .iter()
+                .find(|x| &x.0 == t)
+                .map(|x| x.1.clone())
+                .unwrap_or_else(|| "(removed)".into())
         };
 
         dialog("Schedules").open(&mut open).show(ctx, |ui| {

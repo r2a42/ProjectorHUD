@@ -1,6 +1,8 @@
 //! Colours, type scale and small painted widgets.
 
-use eframe::egui::{self, Color32, FontId, Response, RichText, Rounding, Sense, Stroke, TextStyle, Ui, Vec2};
+use eframe::egui::{
+    self, Color32, FontId, Response, RichText, Rounding, Sense, Stroke, TextStyle, Ui, Vec2,
+};
 
 pub const BG: Color32 = Color32::from_rgb(0x0D, 0x10, 0x15);
 pub const PANEL: Color32 = Color32::from_rgb(0x13, 0x17, 0x1E);
@@ -37,8 +39,18 @@ pub fn apply(ctx: &egui::Context) {
     v.hyperlink_color = ACCENT;
     v.selection.bg_fill = mix(PANEL, ACCENT, 0.45);
     v.selection.stroke = Stroke::new(1.0_f32, TEXT);
-    v.popup_shadow = egui::Shadow { offset: [0.0, 8.0].into(), blur: 24.0, spread: 0.0, color: Color32::from_black_alpha(120) };
-    v.window_shadow = egui::Shadow { offset: [0.0, 16.0].into(), blur: 48.0, spread: 0.0, color: Color32::from_black_alpha(160) };
+    v.popup_shadow = egui::Shadow {
+        offset: [0.0, 8.0].into(),
+        blur: 24.0,
+        spread: 0.0,
+        color: Color32::from_black_alpha(120),
+    };
+    v.window_shadow = egui::Shadow {
+        offset: [0.0, 16.0].into(),
+        blur: 48.0,
+        spread: 0.0,
+        color: Color32::from_black_alpha(160),
+    };
 
     let r = Rounding::same(8.0);
     v.widgets.noninteractive.bg_fill = PANEL;
@@ -69,11 +81,16 @@ pub fn apply(ctx: &egui::Context) {
     ctx.set_visuals(v);
 
     ctx.style_mut(|s| {
-        s.text_styles.insert(TextStyle::Body, FontId::proportional(14.0));
-        s.text_styles.insert(TextStyle::Button, FontId::proportional(14.0));
-        s.text_styles.insert(TextStyle::Heading, FontId::proportional(22.0));
-        s.text_styles.insert(TextStyle::Small, FontId::proportional(12.0));
-        s.text_styles.insert(TextStyle::Monospace, FontId::monospace(12.0));
+        s.text_styles
+            .insert(TextStyle::Body, FontId::proportional(14.0));
+        s.text_styles
+            .insert(TextStyle::Button, FontId::proportional(14.0));
+        s.text_styles
+            .insert(TextStyle::Heading, FontId::proportional(22.0));
+        s.text_styles
+            .insert(TextStyle::Small, FontId::proportional(12.0));
+        s.text_styles
+            .insert(TextStyle::Monospace, FontId::monospace(12.0));
         s.spacing.item_spacing = Vec2::new(8.0, 8.0);
         s.spacing.button_padding = Vec2::new(12.0, 6.0);
         s.spacing.interact_size.y = 30.0;
@@ -94,7 +111,12 @@ pub fn small(text: impl Into<String>) -> RichText {
 /// Section heading in small caps style.
 pub fn section(ui: &mut Ui, text: &str) {
     ui.add_space(6.0);
-    ui.label(RichText::new(text.to_uppercase()).color(FAINT).size(11.0).strong());
+    ui.label(
+        RichText::new(text.to_uppercase())
+            .color(FAINT)
+            .size(11.0)
+            .strong(),
+    );
 }
 
 /// Rounded status tag, e.g. `ON` or `OFFLINE`.
@@ -103,19 +125,32 @@ pub fn pill(ui: &mut Ui, text: &str, color: Color32) -> Response {
     let galley = ui.painter().layout_no_wrap(text.to_string(), font, color);
     let size = galley.size() + Vec2::new(16.0, 8.0);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
-    ui.painter().rect(rect, size.y / 2.0, mix(CARD, color, 0.16), Stroke::new(1.0_f32, mix(CARD, color, 0.45)));
-    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, color);
+    ui.painter().rect(
+        rect,
+        size.y / 2.0,
+        mix(CARD, color, 0.16),
+        Stroke::new(1.0_f32, mix(CARD, color, 0.45)),
+    );
+    ui.painter()
+        .galley(rect.center() - galley.size() / 2.0, galley, color);
     resp
 }
 
 pub fn dot(ui: &mut Ui, color: Color32) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
-    ui.painter().circle_filled(rect.center(), 6.5, mix(CARD, color, 0.25));
+    ui.painter()
+        .circle_filled(rect.center(), 6.5, mix(CARD, color, 0.25));
     ui.painter().circle_filled(rect.center(), 4.0, color);
 }
 
 /// A button that lights up in `active` colour when its function is engaged.
-pub fn toggle(ui: &mut Ui, size: Vec2, text: &str, active: Option<Color32>, enabled: bool) -> Response {
+pub fn toggle(
+    ui: &mut Ui,
+    size: Vec2,
+    text: &str,
+    active: Option<Color32>,
+    enabled: bool,
+) -> Response {
     let (fill, fg, stroke) = match active {
         Some(c) if enabled => (mix(CARD, c, 0.22), c, mix(CARD, c, 0.6)),
         _ => (BUTTON, TEXT, STROKE),
@@ -133,10 +168,14 @@ pub fn toggle(ui: &mut Ui, size: Vec2, text: &str, active: Option<Color32>, enab
 /// Filled call-to-action button.
 pub fn primary(ui: &mut Ui, text: &str, color: Color32) -> Response {
     ui.add(
-        egui::Button::new(RichText::new(text).color(Color32::from_rgb(0x08, 0x0B, 0x10)).strong())
-            .fill(color)
-            .stroke(Stroke::NONE)
-            .rounding(8.0),
+        egui::Button::new(
+            RichText::new(text)
+                .color(Color32::from_rgb(0x08, 0x0B, 0x10))
+                .strong(),
+        )
+        .fill(color)
+        .stroke(Stroke::NONE)
+        .rounding(8.0),
     )
 }
 
@@ -144,7 +183,7 @@ pub fn thousands(n: u32) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);

@@ -77,7 +77,14 @@ pub fn parse_errors(v: &str) -> Option<Errors> {
     if d.len() != 6 {
         return None;
     }
-    Some(Errors { fan: d[0], lamp: d[1], temperature: d[2], cover: d[3], filter: d[4], other: d[5] })
+    Some(Errors {
+        fan: d[0],
+        lamp: d[1],
+        temperature: d[2],
+        cover: d[3],
+        filter: d[4],
+        other: d[5],
+    })
 }
 
 pub fn parse_lamps(v: &str) -> Vec<Lamp> {
@@ -86,7 +93,10 @@ pub fn parse_lamps(v: &str) -> Vec<Lamp> {
         .chunks(2)
         .filter_map(|c| {
             let hours = c.first()?.parse().ok()?;
-            Some(Lamp { hours, on: c.get(1) == Some(&"1") })
+            Some(Lamp {
+                hours,
+                on: c.get(1) == Some(&"1"),
+            })
         })
         .collect()
 }
@@ -154,7 +164,9 @@ impl PjLinkDriver {
         self.log.push(LogKind::Rx, redact_greeting(&greeting));
         let upper = greeting.to_ascii_uppercase();
         if !upper.starts_with("PJLINK") {
-            return Err(DriverError::Protocol(format!("Not a PJLink device (got \"{greeting}\")")));
+            return Err(DriverError::Protocol(format!(
+                "Not a PJLink device (got \"{greeting}\")"
+            )));
         }
         let mut parts = greeting.split_whitespace().skip(1);
         match parts.next() {
@@ -162,14 +174,20 @@ impl PjLinkDriver {
             Some("1") => {
                 let random = parts.next().unwrap_or("");
                 if self.password.is_empty() {
-                    return Err(DriverError::Auth("This projector requires a PJLink password".into()));
+                    return Err(DriverError::Auth(
+                        "This projector requires a PJLink password".into(),
+                    ));
                 }
                 self.pending_digest = Some(digest(random, &self.password));
             }
             Some(other) if other.eq_ignore_ascii_case("ERRA") => {
                 return Err(DriverError::Auth("Password rejected".into()));
             }
-            _ => return Err(DriverError::Protocol(format!("Unexpected greeting \"{greeting}\""))),
+            _ => {
+                return Err(DriverError::Protocol(format!(
+                    "Unexpected greeting \"{greeting}\""
+                )))
+            }
         }
         self.conn = Some(conn);
         Ok(())
@@ -207,7 +225,8 @@ impl PjLinkDriver {
         match self.exchange_once(class, cmd, param) {
             Err(DriverError::Io(_)) if had_conn => {
                 self.conn = None;
-                self.log.push(LogKind::Info, "Connection lost, reconnecting");
+                self.log
+                    .push(LogKind::Info, "Connection lost, reconnecting");
                 let r = self.exchange_once(class, cmd, param);
                 if r.is_err() {
                     self.conn = None;
@@ -227,7 +246,12 @@ impl PjLinkDriver {
         self.query_param(class, cmd, "?")
     }
 
-    fn query_param(&mut self, class: u8, cmd: &str, param: &str) -> Result<Option<String>, DriverError> {
+    fn query_param(
+        &mut self,
+        class: u8,
+        cmd: &str,
+        param: &str,
+    ) -> Result<Option<String>, DriverError> {
         Ok(match self.exchange(class, cmd, param)? {
             Reply::Value(v) => Some(v),
             _ => None,
@@ -237,11 +261,15 @@ impl PjLinkDriver {
     fn set(&mut self, class: u8, cmd: &str, param: &str) -> Result<(), DriverError> {
         match self.exchange(class, cmd, param)? {
             Reply::Value(_) => Ok(()),
-            Reply::Undefined => Err(DriverError::Protocol("Not supported by this projector".into())),
-            Reply::OutOfParameter => Err(DriverError::Protocol("Projector rejected the value".into())),
-            Reply::Unavailable => {
-                Err(DriverError::Protocol("Not available right now (standby, warming or busy)".into()))
+            Reply::Undefined => Err(DriverError::Protocol(
+                "Not supported by this projector".into(),
+            )),
+            Reply::OutOfParameter => {
+                Err(DriverError::Protocol("Projector rejected the value".into()))
             }
+            Reply::Unavailable => Err(DriverError::Protocol(
+                "Not available right now (standby, warming or busy)".into(),
+            )),
             Reply::Failure => Err(DriverError::Protocol("Projector reports a failure".into())),
         }
     }
@@ -262,7 +290,10 @@ impl PjLinkDriver {
         let codes = self.query(self.class, "INST")?.unwrap_or_default();
         let mut inputs: Vec<InputSource> = codes
             .split_whitespace()
-            .map(|c| InputSource { code: c.to_string(), name: default_input_name(c) })
+            .map(|c| InputSource {
+                code: c.to_string(),
+                name: default_input_name(c),
+            })
             .collect();
         if self.class >= 2 {
             st.serial = self.query(2, "SNUM")?.unwrap_or_default();
@@ -291,7 +322,11 @@ fn redact_greeting(g: &str) -> String {
 }
 
 impl Driver for PjLinkDriver {
-    fn poll(&mut self, st: &mut ProjectorState, publish: &dyn Fn(&ProjectorState)) -> Result<(), DriverError> {
+    fn poll(
+        &mut self,
+        st: &mut ProjectorState,
+        publish: &dyn Fn(&ProjectorState),
+    ) -> Result<(), DriverError> {
         // Power first: it is the cheapest proof of life and what operators look at.
         let power = match self.exchange(1, "POWR", "?")? {
             Reply::Value(v) => parse_power(&v),
@@ -313,7 +348,9 @@ impl Driver for PjLinkDriver {
         }
 
         if power == Power::On {
-            st.input = self.query(self.class, "INPT")?.map(|v| v.trim().to_string());
+            st.input = self
+                .query(self.class, "INPT")?
+                .map(|v| v.trim().to_string());
             match self.query(1, "AVMT")?.and_then(|v| parse_avmt(&v)) {
                 Some((video, audio)) => {
                     st.video_mute = Some(video);
@@ -324,7 +361,11 @@ impl Driver for PjLinkDriver {
                     st.audio_mute = None;
                 }
             }
-            st.freeze = if self.class >= 2 { self.query(2, "FREZ")?.map(|v| v.trim() == "1") } else { None };
+            st.freeze = if self.class >= 2 {
+                self.query(2, "FREZ")?.map(|v| v.trim() == "1")
+            } else {
+                None
+            };
         } else {
             st.video_mute = None;
             st.audio_mute = None;
@@ -355,17 +396,29 @@ mod tests {
     #[test]
     fn spec_digest_example() {
         // Example from the PJLink specification.
-        assert_eq!(digest("498e4a67", "JBMIAProjectorLink"), "5d8409bc1c3fa39749434aa3a5c38682");
+        assert_eq!(
+            digest("498e4a67", "JBMIAProjectorLink"),
+            "5d8409bc1c3fa39749434aa3a5c38682"
+        );
     }
 
     #[test]
     fn replies() {
-        assert_eq!(parse_reply("%1POWR=1", "POWR"), Some(Reply::Value("1".into())));
+        assert_eq!(
+            parse_reply("%1POWR=1", "POWR"),
+            Some(Reply::Value("1".into()))
+        );
         assert_eq!(parse_reply("%1powr=ERR3", "POWR"), Some(Reply::Unavailable));
-        assert_eq!(parse_reply("%2INNM=HDMI 1", "INNM"), Some(Reply::Value("HDMI 1".into())));
+        assert_eq!(
+            parse_reply("%2INNM=HDMI 1", "INNM"),
+            Some(Reply::Value("HDMI 1".into()))
+        );
         assert_eq!(parse_reply("%1INPT=31", "POWR"), None);
         assert_eq!(parse_reply("junk", "POWR"), None);
-        assert_eq!(parse_reply("%1NAME=", "NAME"), Some(Reply::Value(String::new())));
+        assert_eq!(
+            parse_reply("%1NAME=", "NAME"),
+            Some(Reply::Value(String::new()))
+        );
     }
 
     #[test]
@@ -377,7 +430,16 @@ mod tests {
         assert!(parse_errors("00").is_none());
         assert_eq!(
             parse_lamps("1234 1 80 0"),
-            vec![Lamp { hours: 1234, on: true }, Lamp { hours: 80, on: false }]
+            vec![
+                Lamp {
+                    hours: 1234,
+                    on: true
+                },
+                Lamp {
+                    hours: 80,
+                    on: false
+                }
+            ]
         );
         assert_eq!(parse_avmt("31"), Some((true, true)));
         assert_eq!(parse_avmt("30"), Some((false, false)));

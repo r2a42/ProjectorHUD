@@ -39,7 +39,10 @@ impl LineConn {
         stream.set_nodelay(true).ok();
         stream.set_read_timeout(Some(io_timeout))?;
         stream.set_write_timeout(Some(io_timeout))?;
-        Ok(Self { stream, buf: Vec::new() })
+        Ok(Self {
+            stream,
+            buf: Vec::new(),
+        })
     }
 
     pub fn send(&mut self, text: &str) -> io::Result<()> {
@@ -62,11 +65,17 @@ impl LineConn {
             let mut tmp = [0u8; 512];
             let n = self.stream.read(&mut tmp)?;
             if n == 0 {
-                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "connection closed by projector"));
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "connection closed by projector",
+                ));
             }
             self.buf.extend_from_slice(&tmp[..n]);
             if self.buf.len() > 16 * 1024 {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "response too long"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "response too long",
+                ));
             }
         }
     }
@@ -77,8 +86,12 @@ pub fn describe(e: &io::Error) -> String {
     use io::ErrorKind::*;
     match e.kind() {
         TimedOut | WouldBlock => "No response (timed out)".into(),
-        ConnectionRefused => "Connection refused (is network control enabled on the projector?)".into(),
-        ConnectionReset | ConnectionAborted | BrokenPipe | UnexpectedEof => "Connection dropped".into(),
+        ConnectionRefused => {
+            "Connection refused (is network control enabled on the projector?)".into()
+        }
+        ConnectionReset | ConnectionAborted | BrokenPipe | UnexpectedEof => {
+            "Connection dropped".into()
+        }
         NotFound => "Host name did not resolve".into(),
         _ => {
             let s = e.to_string();

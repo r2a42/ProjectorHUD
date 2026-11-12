@@ -31,13 +31,28 @@ fn pjlink_full_cycle() {
     assert_eq!(st.power, Power::Standby);
     assert_eq!(st.device_name, "Test PJ");
     assert_eq!(st.class, 2);
-    assert_eq!(st.inputs[0], InputSource { code: "31".into(), name: "HDMI 1".into() });
+    assert_eq!(
+        st.inputs[0],
+        InputSource {
+            code: "31".into(),
+            name: "HDMI 1".into()
+        }
+    );
     assert_eq!(st.errors, Some(Errors::default()));
-    assert_eq!(st.lamps, vec![Lamp { hours: 120, on: false }]);
+    assert_eq!(
+        st.lamps,
+        vec![Lamp {
+            hours: 120,
+            on: false
+        }]
+    );
     assert_eq!(st.video_mute, None, "mute state is unknown in standby");
 
     // Input switching is refused in standby and reported as an error.
-    assert!(matches!(d.command(&Command::Input("32".into())), Err(DriverError::Protocol(_))));
+    assert!(matches!(
+        d.command(&Command::Input("32".into())),
+        Err(DriverError::Protocol(_))
+    ));
 
     d.command(&Command::PowerOn).unwrap();
     poll(&mut d, &mut st).unwrap();
@@ -69,7 +84,11 @@ fn pjlink_full_cycle() {
 
 #[test]
 fn pjlink_authentication() {
-    let sim = sim::spawn(SimSpec { password: Some("secret".into()), ..fast_spec() }).unwrap();
+    let sim = sim::spawn(SimSpec {
+        password: Some("secret".into()),
+        ..fast_spec()
+    })
+    .unwrap();
     let mut st = ProjectorState::default();
 
     let mut good = PjLinkDriver::new("127.0.0.1", sim.port, "secret", Log::default());
@@ -80,12 +99,21 @@ fn pjlink_authentication() {
     assert!(matches!(poll(&mut bad, &mut st), Err(DriverError::Auth(_))));
 
     let mut none = PjLinkDriver::new("127.0.0.1", sim.port, "", Log::default());
-    assert!(matches!(poll(&mut none, &mut st), Err(DriverError::Auth(_))));
+    assert!(matches!(
+        poll(&mut none, &mut st),
+        Err(DriverError::Auth(_))
+    ));
 }
 
 #[test]
 fn pjlink_class1_and_errors() {
-    let sim = sim::spawn(SimSpec { class: 1, errors: [0, 0, 2, 0, 1, 0], powered: true, ..fast_spec() }).unwrap();
+    let sim = sim::spawn(SimSpec {
+        class: 1,
+        errors: [0, 0, 2, 0, 1, 0],
+        powered: true,
+        ..fast_spec()
+    })
+    .unwrap();
     let mut d = PjLinkDriver::new("127.0.0.1", sim.port, "", Log::default());
     let mut st = ProjectorState::default();
     poll(&mut d, &mut st).unwrap();
@@ -94,12 +122,18 @@ fn pjlink_class1_and_errors() {
     assert_eq!(st.severity(), Severity::Error);
     let issues: Vec<String> = st.issues().into_iter().map(|i| i.0).collect();
     assert_eq!(issues, vec!["Temperature error", "Filter warning"]);
-    assert!(d.command(&Command::Freeze(true)).is_err(), "class 1 has no freeze");
+    assert!(
+        d.command(&Command::Freeze(true)).is_err(),
+        "class 1 has no freeze"
+    );
 }
 
 #[test]
 fn pjlink_survives_dropped_connection() {
-    let spec = SimSpec { port: 0, ..fast_spec() };
+    let spec = SimSpec {
+        port: 0,
+        ..fast_spec()
+    };
     let sim = sim::spawn(spec.clone()).unwrap();
     let port = sim.port;
     let mut d = PjLinkDriver::new("127.0.0.1", port, "", Log::default());
@@ -111,7 +145,10 @@ fn pjlink_survives_dropped_connection() {
     std::thread::sleep(Duration::from_millis(200));
     let deadline = Instant::now() + Duration::from_secs(40);
     while poll(&mut d, &mut st).is_ok() {
-        assert!(Instant::now() < deadline, "driver never noticed the projector vanished");
+        assert!(
+            Instant::now() < deadline,
+            "driver never noticed the projector vanished"
+        );
         std::thread::sleep(Duration::from_millis(100));
     }
 
@@ -123,7 +160,12 @@ fn pjlink_survives_dropped_connection() {
 
 #[test]
 fn panasonic_native() {
-    let sim = sim::spawn(SimSpec { ntcontrol_port: Some(0), password: Some("pw".into()), ..fast_spec() }).unwrap();
+    let sim = sim::spawn(SimSpec {
+        ntcontrol_port: Some(0),
+        password: Some("pw".into()),
+        ..fast_spec()
+    })
+    .unwrap();
     let port = sim.ntcontrol_port.unwrap();
     let mut st = ProjectorState::default();
 
@@ -145,7 +187,11 @@ fn panasonic_native() {
 #[test]
 fn worker_reports_offline_then_recovers() {
     // Reserve a port with nothing listening on it.
-    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
     let cfg = ProjectorConfig {
         id: 1,
         name: "W".into(),
@@ -161,14 +207,22 @@ fn worker_reports_offline_then_recovers() {
     let wait_for = |want: Link, secs: u64| {
         let deadline = Instant::now() + Duration::from_secs(secs);
         while handle.snapshot().link != want {
-            assert!(Instant::now() < deadline, "never reached {want:?}; at {:?}", handle.snapshot().link);
+            assert!(
+                Instant::now() < deadline,
+                "never reached {want:?}; at {:?}",
+                handle.snapshot().link
+            );
             std::thread::sleep(Duration::from_millis(50));
         }
     };
     wait_for(Link::Offline, 5);
     assert!(handle.snapshot().link_error.is_some());
 
-    let _sim = sim::spawn(SimSpec { port, ..fast_spec() }).unwrap();
+    let _sim = sim::spawn(SimSpec {
+        port,
+        ..fast_spec()
+    })
+    .unwrap();
     wait_for(Link::Online, 30);
 
     handle.send(Command::PowerOn);

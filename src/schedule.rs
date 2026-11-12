@@ -18,7 +18,12 @@ pub enum Action {
 }
 
 impl Action {
-    pub const ALL: [Action; 4] = [Action::PowerOn, Action::PowerOff, Action::ShutterClose, Action::ShutterOpen];
+    pub const ALL: [Action; 4] = [
+        Action::PowerOn,
+        Action::PowerOff,
+        Action::ShutterClose,
+        Action::ShutterOpen,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -93,7 +98,10 @@ pub fn start(schedules: Arc<Mutex<Vec<Schedule>>>, hub: Arc<Mutex<Hub>>, last_ru
                     .collect();
                 for s in due {
                     fired.insert(s.id, stamp);
-                    let n = hub.lock().unwrap().send_target(&s.target, s.action.command());
+                    let n = hub
+                        .lock()
+                        .unwrap()
+                        .send_target(&s.target, s.action.command());
                     *last_run.lock().unwrap() = Some(format!(
                         "{} · {} sent to {} projector{}",
                         now.format("%a %H:%M"),

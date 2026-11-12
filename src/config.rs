@@ -24,7 +24,8 @@ impl AppConfig {
         if let Ok(p) = std::env::var("PROJECTORHUD_CONFIG") {
             return Some(PathBuf::from(p));
         }
-        directories::ProjectDirs::from("", "", "ProjectorHUD").map(|d| d.config_dir().join("config.json"))
+        directories::ProjectDirs::from("", "", "ProjectorHUD")
+            .map(|d| d.config_dir().join("config.json"))
     }
 
     pub fn load() -> Self {
@@ -36,7 +37,9 @@ impl AppConfig {
 
     /// Write atomically (temp file + rename) so a crash can't truncate the config.
     pub fn save(&self) -> std::io::Result<()> {
-        let Some(path) = Self::path() else { return Ok(()) };
+        let Some(path) = Self::path() else {
+            return Ok(());
+        };
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }

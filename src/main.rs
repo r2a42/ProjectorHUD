@@ -21,7 +21,10 @@ fn main() -> eframe::Result {
                 }
             })
             .collect();
-        println!("{} simulated projectors running. Ctrl-C to stop.", sims.len());
+        println!(
+            "{} simulated projectors running. Ctrl-C to stop.",
+            sims.len()
+        );
         loop {
             std::thread::park();
         }
@@ -34,5 +37,9 @@ fn main() -> eframe::Result {
             .with_min_inner_size([920.0, 560.0]),
         ..Default::default()
     };
-    eframe::run_native("ProjectorHUD", options, Box::new(|cc| Ok(Box::new(ui::App::new(cc)))))
+    eframe::run_native(
+        "ProjectorHUD",
+        options,
+        Box::new(|cc| Ok(Box::new(ui::App::new(cc)))),
+    )
 }

@@ -102,11 +102,13 @@ impl App {
             scan_subnet: String::new(),
             show_schedules: false,
             new_group: None,
-            shot: std::env::var("PROJECTORHUD_SCREENSHOT").ok().map(|path| Shot {
-                path,
-                at: Instant::now() + Duration::from_secs(5),
-                requested: false,
-            }),
+            shot: std::env::var("PROJECTORHUD_SCREENSHOT")
+                .ok()
+                .map(|path| Shot {
+                    path,
+                    at: Instant::now() + Duration::from_secs(5),
+                    requested: false,
+                }),
         };
         if app.cfg.demo {
             app.start_sims();
@@ -120,7 +122,14 @@ impl App {
             }
         }
         match std::env::var("PROJECTORHUD_SHOT_VIEW").as_deref() {
-            Ok("detail") => app.selected = app.cfg.projectors.iter().find(|p| p.name.contains("Rehearsal")).map(|p| p.id),
+            Ok("detail") => {
+                app.selected = app
+                    .cfg
+                    .projectors
+                    .iter()
+                    .find(|p| p.name.contains("Rehearsal"))
+                    .map(|p| p.id)
+            }
             Ok("schedules") => app.show_schedules = true,
             Ok("scan") => app.apply(Act::OpenScan),
             _ => {}
@@ -136,7 +145,10 @@ impl App {
     }
 
     fn start_sims(&mut self) {
-        self.sims = sim::demo_fleet().into_iter().filter_map(|s| sim::spawn(s).ok()).collect();
+        self.sims = sim::demo_fleet()
+            .into_iter()
+            .filter_map(|s| sim::spawn(s).ok())
+            .collect();
     }
 
     fn set_demo(&mut self, on: bool) {
@@ -173,7 +185,12 @@ impl App {
             }
             drop(hub);
             self.cfg.projectors.retain(|p| !p.demo);
-            if !self.cfg.projectors.iter().any(|p| p.group.as_deref() == Some(DEMO_GROUP)) {
+            if !self
+                .cfg
+                .projectors
+                .iter()
+                .any(|p| p.group.as_deref() == Some(DEMO_GROUP))
+            {
                 self.cfg.groups.retain(|g| g != DEMO_GROUP);
                 if self.view == Target::Group(DEMO_GROUP.into()) {
                     self.view = Target::All;
@@ -218,7 +235,9 @@ impl App {
             Act::Remove(id) => {
                 self.hub.lock().unwrap().remove(id);
                 self.cfg.projectors.retain(|p| p.id != id);
-                self.cfg.schedules.retain(|s| s.target != Target::Projector(id));
+                self.cfg
+                    .schedules
+                    .retain(|s| s.target != Target::Projector(id));
                 if self.selected == Some(id) {
                     self.selected = None;
                 }
@@ -242,12 +261,19 @@ impl App {
             Act::DeleteGroup(name) => {
                 self.cfg.groups.retain(|g| g != &name);
                 let mut hub = self.hub.lock().unwrap();
-                for p in self.cfg.projectors.iter_mut().filter(|p| p.group.as_deref() == Some(name.as_str())) {
+                for p in self
+                    .cfg
+                    .projectors
+                    .iter_mut()
+                    .filter(|p| p.group.as_deref() == Some(name.as_str()))
+                {
                     p.group = None;
                     hub.upsert(p.clone());
                 }
                 drop(hub);
-                self.cfg.schedules.retain(|s| s.target != Target::Group(name.clone()));
+                self.cfg
+                    .schedules
+                    .retain(|s| s.target != Target::Group(name.clone()));
                 if self.view == Target::Group(name) {
                     self.view = Target::All;
                 }
@@ -256,7 +282,10 @@ impl App {
             Act::OpenScan => {
                 self.show_scan = true;
                 if self.scan.is_none() {
-                    self.scan = Some(projectorhud::discovery::start(Vec::new(), self.repaint.clone()));
+                    self.scan = Some(projectorhud::discovery::start(
+                        Vec::new(),
+                        self.repaint.clone(),
+                    ));
                 }
             }
             Act::OpenSchedules => self.show_schedules = true,
@@ -280,7 +309,10 @@ impl eframe::App for App {
         self.top_bar(ctx, &items, &mut acts);
         self.alert_bar(ctx, &items, &mut acts);
         self.sidebar(ctx, &items, &mut acts);
-        if let Some(item) = self.selected.and_then(|id| items.iter().find(|i| i.0.id == id)) {
+        if let Some(item) = self
+            .selected
+            .and_then(|id| items.iter().find(|i| i.0.id == id))
+        {
             self.detail_panel(ctx, item, &mut acts);
         }
         self.central(ctx, &items, &mut acts);
@@ -319,7 +351,11 @@ fn power_label(st: &ProjectorState) -> &'static str {
 
 fn subtitle(cfg: &ProjectorConfig, st: &ProjectorState) -> String {
     let model = format!("{} {}", st.manufacturer.trim(), st.model.trim());
-    let host = if cfg.port == cfg.protocol.default_port() { cfg.host.clone() } else { format!("{}:{}", cfg.host, cfg.port) };
+    let host = if cfg.port == cfg.protocol.default_port() {
+        cfg.host.clone()
+    } else {
+        format!("{}:{}", cfg.host, cfg.port)
+    };
     if model.trim().is_empty() {
         host
     } else {
@@ -348,7 +384,11 @@ fn power_off_confirm(cfg: &ProjectorConfig) -> Act {
 impl App {
     fn top_bar(&mut self, ctx: &egui::Context, items: &[Item], acts: &mut Vec<Act>) {
         egui::TopBottomPanel::top("top")
-            .frame(egui::Frame::none().fill(PANEL).inner_margin(egui::Margin::symmetric(18.0, 12.0)))
+            .frame(
+                egui::Frame::none()
+                    .fill(PANEL)
+                    .inner_margin(egui::Margin::symmetric(18.0, 12.0)),
+            )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Projector").size(19.0).strong());
@@ -357,11 +397,24 @@ impl App {
                     ui.add_space(14.0);
 
                     let total = items.len();
-                    let on = items.iter().filter(|i| i.1.link == Link::Online && i.1.power == Power::On).count();
-                    let offline = items.iter().filter(|i| matches!(i.1.link, Link::Offline | Link::AuthFailed)).count();
-                    let faults = items.iter().filter(|i| i.1.link == Link::Online && i.1.severity() != Severity::Ok).count();
+                    let on = items
+                        .iter()
+                        .filter(|i| i.1.link == Link::Online && i.1.power == Power::On)
+                        .count();
+                    let offline = items
+                        .iter()
+                        .filter(|i| matches!(i.1.link, Link::Offline | Link::AuthFailed))
+                        .count();
+                    let faults = items
+                        .iter()
+                        .filter(|i| i.1.link == Link::Online && i.1.severity() != Severity::Ok)
+                        .count();
                     if total > 0 {
-                        pill(ui, &format!("{on} of {total} on"), if on > 0 { GREEN } else { DIM });
+                        pill(
+                            ui,
+                            &format!("{on} of {total} on"),
+                            if on > 0 { GREEN } else { DIM },
+                        );
                         if offline > 0 {
                             pill(ui, &format!("{offline} offline"), RED);
                         }
@@ -380,7 +433,10 @@ impl App {
                         if ui.button("➕ Add projector").clicked() {
                             acts.push(Act::EditNew);
                         }
-                        if primary(ui, "🔍 Discover", ACCENT).on_hover_text("Find projectors on your network").clicked() {
+                        if primary(ui, "🔍 Discover", ACCENT)
+                            .on_hover_text("Find projectors on your network")
+                            .clicked()
+                        {
                             acts.push(Act::OpenScan);
                         }
                     });
@@ -390,31 +446,55 @@ impl App {
 
     /// Unmissable strip listing every projector that needs attention.
     fn alert_bar(&mut self, ctx: &egui::Context, items: &[Item], acts: &mut Vec<Act>) {
-        let troubled: Vec<&Item> = items.iter().filter(|i| i.1.severity() != Severity::Ok).collect();
+        let troubled: Vec<&Item> = items
+            .iter()
+            .filter(|i| i.1.severity() != Severity::Ok)
+            .collect();
         if troubled.is_empty() {
             return;
         }
-        let worst = troubled.iter().map(|i| i.1.severity()).max().unwrap_or_default();
+        let worst = troubled
+            .iter()
+            .map(|i| i.1.severity())
+            .max()
+            .unwrap_or_default();
         let color = sev_color(worst);
         egui::TopBottomPanel::top("alerts")
-            .frame(egui::Frame::none().fill(mix(BG, color, 0.16)).inner_margin(egui::Margin::symmetric(18.0, 8.0)))
+            .frame(
+                egui::Frame::none()
+                    .fill(mix(BG, color, 0.16))
+                    .inner_margin(egui::Margin::symmetric(18.0, 8.0)),
+            )
             .show(ctx, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     let n = troubled.len();
                     ui.label(
-                        RichText::new(format!("⚠  {n} projector{} need{} attention", if n == 1 { "" } else { "s" }, if n == 1 { "s" } else { "" }))
-                            .color(color)
-                            .strong(),
+                        RichText::new(format!(
+                            "⚠  {n} projector{} need{} attention",
+                            if n == 1 { "" } else { "s" },
+                            if n == 1 { "s" } else { "" }
+                        ))
+                        .color(color)
+                        .strong(),
                     );
                     ui.add_space(6.0);
                     for (cfg, st) in troubled {
                         let c = sev_color(st.severity());
-                        let what = st.issues().into_iter().map(|i| i.0).collect::<Vec<_>>().join(", ");
+                        let what = st
+                            .issues()
+                            .into_iter()
+                            .map(|i| i.0)
+                            .collect::<Vec<_>>()
+                            .join(", ");
                         let resp = ui.add(
-                            egui::Button::new(RichText::new(format!("{}  ·  {}", cfg.name, what)).color(c).size(13.0))
-                                .fill(mix(BG, c, 0.10))
-                                .stroke(Stroke::new(1.0_f32, mix(BG, c, 0.5)))
-                                .rounding(14.0),
+                            egui::Button::new(
+                                RichText::new(format!("{}  ·  {}", cfg.name, what))
+                                    .color(c)
+                                    .size(13.0),
+                            )
+                            .fill(mix(BG, c, 0.10))
+                            .stroke(Stroke::new(1.0_f32, mix(BG, c, 0.5)))
+                            .rounding(14.0),
                         );
                         if resp.on_hover_text("Show details").clicked() {
                             acts.push(Act::View(Target::All));
@@ -508,13 +588,19 @@ impl App {
 
     fn central(&mut self, ctx: &egui::Context, items: &[Item], acts: &mut Vec<Act>) {
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(BG).inner_margin(egui::Margin { left: 20.0, right: 8.0, top: 16.0, bottom: 0.0 }))
+            .frame(egui::Frame::none().fill(BG).inner_margin(egui::Margin {
+                left: 20.0,
+                right: 8.0,
+                top: 16.0,
+                bottom: 0.0,
+            }))
             .show(ctx, |ui| {
                 if items.is_empty() {
                     welcome(ui, acts);
                     return;
                 }
-                let visible: Vec<&Item> = items.iter().filter(|i| self.view.matches(&i.0)).collect();
+                let visible: Vec<&Item> =
+                    items.iter().filter(|i| self.view.matches(&i.0)).collect();
 
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(self.view_title()).size(22.0).strong());
@@ -528,10 +614,16 @@ impl App {
                         };
                         ui.add_enabled_ui(n > 0, |ui| {
                             if ui.button("Open shutters").clicked() {
-                                acts.push(Act::SendTarget(self.view.clone(), Command::VideoMute(false)));
+                                acts.push(Act::SendTarget(
+                                    self.view.clone(),
+                                    Command::VideoMute(false),
+                                ));
                             }
                             if ui.button("Close shutters").clicked() {
-                                acts.push(Act::SendTarget(self.view.clone(), Command::VideoMute(true)));
+                                acts.push(Act::SendTarget(
+                                    self.view.clone(),
+                                    Command::VideoMute(true),
+                                ));
                             }
                             if ui.button("Power off all").clicked() {
                                 acts.push(Act::Confirm(Confirm {
@@ -539,7 +631,10 @@ impl App {
                                     body: "They will cool down and go to standby.".into(),
                                     button: "Power off all".into(),
                                     danger: true,
-                                    act: Box::new(Act::SendTarget(self.view.clone(), Command::PowerOff)),
+                                    act: Box::new(Act::SendTarget(
+                                        self.view.clone(),
+                                        Command::PowerOff,
+                                    )),
                                 }));
                             }
                             if ui.button("Power on all").clicked() {
@@ -548,7 +643,10 @@ impl App {
                                     body: "Projectors already on are not affected.".into(),
                                     button: "Power on all".into(),
                                     danger: false,
-                                    act: Box::new(Act::SendTarget(self.view.clone(), Command::PowerOn)),
+                                    act: Box::new(Act::SendTarget(
+                                        self.view.clone(),
+                                        Command::PowerOn,
+                                    )),
                                 }));
                             }
                         });
@@ -560,29 +658,40 @@ impl App {
                     ui.add_space(40.0);
                     ui.vertical_centered(|ui| {
                         ui.label(dim("No projectors in this group yet."));
-                        ui.label(small("Right-click a projector and choose “Move to group”, or add a new one."));
+                        ui.label(small(
+                            "Right-click a projector and choose “Move to group”, or add a new one.",
+                        ));
                     });
                     return;
                 }
 
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    let avail = ui.available_width() - 12.0;
-                    let cols = (((avail + GAP) / (CARD_MIN_W + GAP)).floor() as usize).max(1);
-                    let w = ((avail - GAP * (cols as f32 - 1.0)) / cols as f32).floor();
-                    ui.spacing_mut().item_spacing = Vec2::splat(GAP);
-                    for row in visible.chunks(cols) {
-                        ui.horizontal(|ui| {
-                            for (cfg, st) in row.iter().map(|i| (&i.0, &i.1)) {
-                                self.card(ui, w, cfg, st, acts);
-                            }
-                        });
-                    }
-                    ui.add_space(8.0);
-                });
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        let avail = ui.available_width() - 12.0;
+                        let cols = (((avail + GAP) / (CARD_MIN_W + GAP)).floor() as usize).max(1);
+                        let w = ((avail - GAP * (cols as f32 - 1.0)) / cols as f32).floor();
+                        ui.spacing_mut().item_spacing = Vec2::splat(GAP);
+                        for row in visible.chunks(cols) {
+                            ui.horizontal(|ui| {
+                                for (cfg, st) in row.iter().map(|i| (&i.0, &i.1)) {
+                                    self.card(ui, w, cfg, st, acts);
+                                }
+                            });
+                        }
+                        ui.add_space(8.0);
+                    });
             });
     }
 
-    fn card(&self, ui: &mut egui::Ui, w: f32, cfg: &ProjectorConfig, st: &ProjectorState, acts: &mut Vec<Act>) {
+    fn card(
+        &self,
+        ui: &mut egui::Ui,
+        w: f32,
+        cfg: &ProjectorConfig,
+        st: &ProjectorState,
+        acts: &mut Vec<Act>,
+    ) {
         let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, CARD_H), Sense::click());
         if resp.clicked() {
             acts.push(Act::Select(Some(cfg.id)));
@@ -607,9 +716,11 @@ impl App {
             }
             Severity::Ok => (STROKE, 1.0),
         };
-        ui.painter().rect(rect, 12.0, fill, Stroke::new(width, border));
+        ui.painter()
+            .rect(rect, 12.0, fill, Stroke::new(width, border));
         if selected {
-            ui.painter().rect_stroke(rect.expand(3.0), 15.0, Stroke::new(2.0_f32, ACCENT));
+            ui.painter()
+                .rect_stroke(rect.expand(3.0), 15.0, Stroke::new(2.0_f32, ACCENT));
         }
 
         resp.context_menu(|ui| {
@@ -618,12 +729,18 @@ impl App {
                 ui.close_menu();
             }
             ui.menu_button("Move to group", |ui| {
-                if ui.selectable_label(cfg.group.is_none(), "No group").clicked() {
+                if ui
+                    .selectable_label(cfg.group.is_none(), "No group")
+                    .clicked()
+                {
                     acts.push(Act::SetGroup(cfg.id, None));
                     ui.close_menu();
                 }
                 for g in &self.cfg.groups {
-                    if ui.selectable_label(cfg.group.as_deref() == Some(g.as_str()), g).clicked() {
+                    if ui
+                        .selectable_label(cfg.group.as_deref() == Some(g.as_str()), g)
+                        .clicked()
+                    {
                         acts.push(Act::SetGroup(cfg.id, Some(g.clone())));
                         ui.close_menu();
                     }
@@ -641,18 +758,30 @@ impl App {
         });
 
         let inner = rect.shrink2(Vec2::new(16.0, 14.0));
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(Layout::top_down(Align::Min)));
-        (|ui: &mut egui::Ui| {
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(inner)
+                .layout(Layout::top_down(Align::Min)),
+        );
+        {
+            let ui = &mut child;
             ui.spacing_mut().item_spacing = Vec2::new(8.0, 4.0);
 
             // Name + state
-            ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 22.0), Layout::right_to_left(Align::Center), |ui| {
-                pill(ui, power_label(st), power_color(st));
-                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                    dot(ui, power_color(st));
-                    ui.add(egui::Label::new(RichText::new(&cfg.name).size(16.0).strong()).truncate());
-                });
-            });
+            ui.allocate_ui_with_layout(
+                Vec2::new(ui.available_width(), 22.0),
+                Layout::right_to_left(Align::Center),
+                |ui| {
+                    pill(ui, power_label(st), power_color(st));
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        dot(ui, power_color(st));
+                        ui.add(
+                            egui::Label::new(RichText::new(&cfg.name).size(16.0).strong())
+                                .truncate(),
+                        );
+                    });
+                },
+            );
             ui.add(egui::Label::new(small(subtitle(cfg, st))).truncate());
             ui.add_space(6.0);
 
@@ -669,7 +798,10 @@ impl App {
                         _ => "",
                     }));
                 } else {
-                    let why = st.link_error.clone().unwrap_or_else(|| "Connecting…".into());
+                    let why = st
+                        .link_error
+                        .clone()
+                        .unwrap_or_else(|| "Connecting…".into());
                     ui.add(egui::Label::new(dim(why)).truncate());
                 }
                 if online {
@@ -682,16 +814,38 @@ impl App {
             });
 
             // Faults (loud), failed command, or engaged functions (quiet)
-            let recent_error = st.command_error.as_ref().filter(|(_, at)| at.elapsed() < Duration::from_secs(8));
+            let recent_error = st
+                .command_error
+                .as_ref()
+                .filter(|(_, at)| at.elapsed() < Duration::from_secs(8));
             if !issues.is_empty() && online {
-                let text = issues.iter().map(|i| i.0.as_str()).collect::<Vec<_>>().join("  ·  ");
-                ui.add(egui::Label::new(RichText::new(format!("⚠  {text}")).color(sev_color(sev)).strong()).truncate());
+                let text = issues
+                    .iter()
+                    .map(|i| i.0.as_str())
+                    .collect::<Vec<_>>()
+                    .join("  ·  ");
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(format!("⚠  {text}"))
+                            .color(sev_color(sev))
+                            .strong(),
+                    )
+                    .truncate(),
+                );
             } else if let Some((msg, _)) = recent_error {
                 ui.add(egui::Label::new(RichText::new(msg).color(AMBER).size(12.0)).truncate());
             } else if st.link == Link::AuthFailed {
-                ui.label(RichText::new("Right-click → Edit to set the password").color(RED).size(12.0));
+                ui.label(
+                    RichText::new("Right-click → Edit to set the password")
+                        .color(RED)
+                        .size(12.0),
+                );
             } else if st.link == Link::Offline {
-                ui.label(RichText::new("⚠  Not responding — retrying automatically").color(RED).size(12.0));
+                ui.label(
+                    RichText::new("⚠  Not responding — retrying automatically")
+                        .color(RED)
+                        .size(12.0),
+                );
             } else {
                 let mut flags = Vec::new();
                 if st.video_mute == Some(true) {
@@ -707,16 +861,24 @@ impl App {
             }
 
             // Controls pinned to the bottom edge
-            let bottom = egui::Rect::from_min_max(egui::pos2(inner.left(), inner.bottom() - 30.0), inner.right_bottom());
-            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(bottom).layout(Layout::top_down(Align::Min)), |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    ui.spacing_mut().button_padding = Vec2::new(4.0, 4.0);
-                    let bw = ((inner.width() - 18.0) / 4.0).floor();
-                    control_buttons(ui, Vec2::new(bw, 30.0), cfg, st, acts);
-                });
-            });
-        })(&mut child);
+            let bottom = egui::Rect::from_min_max(
+                egui::pos2(inner.left(), inner.bottom() - 30.0),
+                inner.right_bottom(),
+            );
+            ui.allocate_new_ui(
+                egui::UiBuilder::new()
+                    .max_rect(bottom)
+                    .layout(Layout::top_down(Align::Min)),
+                |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        ui.spacing_mut().button_padding = Vec2::new(4.0, 4.0);
+                        let bw = ((inner.width() - 18.0) / 4.0).floor();
+                        control_buttons(ui, Vec2::new(bw, 30.0), cfg, st, acts);
+                    });
+                },
+            );
+        }
     }
 
     fn detail_panel(&mut self, ctx: &egui::Context, item: &Item, acts: &mut Vec<Act>) {
@@ -913,7 +1075,13 @@ impl App {
         });
         if let Some(image) = image {
             let [w, h] = image.size;
-            let _ = image::save_buffer(&shot.path, image.as_raw(), w as u32, h as u32, image::ColorType::Rgba8);
+            let _ = image::save_buffer(
+                &shot.path,
+                image.as_raw(),
+                w as u32,
+                h as u32,
+                image::ColorType::Rgba8,
+            );
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         ctx.request_repaint_after(Duration::from_millis(100));
@@ -931,7 +1099,13 @@ fn remove_confirm(cfg: &ProjectorConfig) -> Act {
 }
 
 /// Power / Shutter / Mute / Freeze, shared by cards and the detail panel.
-fn control_buttons(ui: &mut egui::Ui, size: Vec2, cfg: &ProjectorConfig, st: &ProjectorState, acts: &mut Vec<Act>) {
+fn control_buttons(
+    ui: &mut egui::Ui,
+    size: Vec2,
+    cfg: &ProjectorConfig,
+    st: &ProjectorState,
+    acts: &mut Vec<Act>,
+) {
     let online = st.link == Link::Online;
     let on = online && st.power == Power::On;
 
@@ -944,27 +1118,64 @@ fn control_buttons(ui: &mut egui::Ui, size: Vec2, cfg: &ProjectorConfig, st: &Pr
         Power::Unknown => ("Power", false, None),
     };
     if toggle(ui, size, label, accent, enabled).clicked() {
-        acts.push(if st.power == Power::On { power_off_confirm(cfg) } else { Act::Send(cfg.id, Command::PowerOn) });
+        acts.push(if st.power == Power::On {
+            power_off_confirm(cfg)
+        } else {
+            Act::Send(cfg.id, Command::PowerOn)
+        });
     }
 
     let shut = st.video_mute == Some(true);
-    let r = toggle(ui, size, "Shutter", shut.then_some(AMBER), on && st.video_mute.is_some());
-    if r.on_hover_text(if shut { "Shutter is closed. Click to open." } else { "Blank the picture" }).clicked() {
+    let r = toggle(
+        ui,
+        size,
+        "Shutter",
+        shut.then_some(AMBER),
+        on && st.video_mute.is_some(),
+    );
+    if r.on_hover_text(if shut {
+        "Shutter is closed. Click to open."
+    } else {
+        "Blank the picture"
+    })
+    .clicked()
+    {
         acts.push(Act::Send(cfg.id, Command::VideoMute(!shut)));
     }
 
     let muted = st.audio_mute == Some(true);
-    let r = toggle(ui, size, "Mute", muted.then_some(AMBER), on && st.audio_mute.is_some());
-    if r.on_hover_text(if muted { "Audio is muted. Click to unmute." } else { "Mute audio" }).clicked() {
+    let r = toggle(
+        ui,
+        size,
+        "Mute",
+        muted.then_some(AMBER),
+        on && st.audio_mute.is_some(),
+    );
+    if r.on_hover_text(if muted {
+        "Audio is muted. Click to unmute."
+    } else {
+        "Mute audio"
+    })
+    .clicked()
+    {
         acts.push(Act::Send(cfg.id, Command::AudioMute(!muted)));
     }
 
     let frozen = st.freeze == Some(true);
-    let r = toggle(ui, size, "Freeze", frozen.then_some(COOL), on && st.freeze.is_some());
-    if r
-        .on_hover_text(if frozen { "Picture is frozen. Click to resume." } else { "Freeze the picture" })
-        .on_disabled_hover_text("Needs PJLink Class 2 and the projector powered on")
-        .clicked()
+    let r = toggle(
+        ui,
+        size,
+        "Freeze",
+        frozen.then_some(COOL),
+        on && st.freeze.is_some(),
+    );
+    if r.on_hover_text(if frozen {
+        "Picture is frozen. Click to resume."
+    } else {
+        "Freeze the picture"
+    })
+    .on_disabled_hover_text("Needs PJLink Class 2 and the projector powered on")
+    .clicked()
     {
         acts.push(Act::Send(cfg.id, Command::Freeze(!frozen)));
     }
@@ -996,8 +1207,15 @@ fn banner(ui: &mut egui::Ui, color: Color32, text: &str) {
         });
 }
 
-fn nav_row(ui: &mut egui::Ui, label: &str, count: usize, sev: Severity, selected: bool) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), Sense::click());
+fn nav_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    count: usize,
+    sev: Severity,
+    selected: bool,
+) -> egui::Response {
+    let (rect, resp) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), Sense::click());
     let fill = if selected {
         mix(PANEL, ACCENT, 0.2)
     } else if resp.hovered() {
@@ -1011,7 +1229,11 @@ fn nav_row(ui: &mut egui::Ui, label: &str, count: usize, sev: Severity, selected
     let mut right = rect.right() - 12.0;
     let count_galley = p.layout_no_wrap(count.to_string(), egui::FontId::proportional(12.0), DIM);
     right -= count_galley.size().x;
-    p.galley(egui::pos2(right, rect.center().y - count_galley.size().y / 2.0), count_galley, DIM);
+    p.galley(
+        egui::pos2(right, rect.center().y - count_galley.size().y / 2.0),
+        count_galley,
+        DIM,
+    );
     if sev != Severity::Ok {
         right -= 12.0;
         p.circle_filled(egui::pos2(right, rect.center().y), 4.0, sev_color(sev));
@@ -1020,7 +1242,11 @@ fn nav_row(ui: &mut egui::Ui, label: &str, count: usize, sev: Severity, selected
     let text_color = if selected { TEXT } else { mix(DIM, TEXT, 0.5) };
     let galley = p.layout_no_wrap(label.to_string(), font, text_color);
     let clip = egui::Rect::from_min_max(rect.min, egui::pos2(right - 8.0, rect.max.y));
-    p.with_clip_rect(clip).galley(egui::pos2(rect.left() + 12.0, rect.center().y - galley.size().y / 2.0), galley, text_color);
+    p.with_clip_rect(clip).galley(
+        egui::pos2(rect.left() + 12.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        text_color,
+    );
     resp
 }
 
@@ -1029,7 +1255,9 @@ fn welcome(ui: &mut egui::Ui, acts: &mut Vec<Act>) {
         ui.add_space((ui.available_height() * 0.22).max(40.0));
         ui.label(RichText::new("No projectors yet").size(28.0).strong());
         ui.add_space(4.0);
-        ui.label(dim("Find the projectors on your network, or add one by address."));
+        ui.label(dim(
+            "Find the projectors on your network, or add one by address.",
+        ));
         ui.add_space(22.0);
         ui.spacing_mut().button_padding = Vec2::new(22.0, 11.0);
         if primary(ui, "🔍  Discover projectors", ACCENT).clicked() {
@@ -1040,7 +1268,10 @@ fn welcome(ui: &mut egui::Ui, acts: &mut Vec<Act>) {
             acts.push(Act::EditNew);
         }
         ui.add_space(4.0);
-        if ui.add(egui::Button::new(dim("Try it with demo projectors")).frame(false)).clicked() {
+        if ui
+            .add(egui::Button::new(dim("Try it with demo projectors")).frame(false))
+            .clicked()
+        {
             acts.push(Act::SetDemo(true));
         }
     });

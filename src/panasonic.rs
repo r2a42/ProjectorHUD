@@ -53,12 +53,16 @@ impl PanasonicDriver {
         let greeting = conn.read_line()?;
         let mut parts = greeting.split_whitespace();
         if !parts.next().unwrap_or("").eq_ignore_ascii_case("NTCONTROL") {
-            return Err(DriverError::Protocol(format!("Not a Panasonic projector (got \"{greeting}\")")));
+            return Err(DriverError::Protocol(format!(
+                "Not a Panasonic projector (got \"{greeting}\")"
+            )));
         }
         let prefix = match parts.next() {
             Some("1") => {
                 if self.password.is_empty() {
-                    return Err(DriverError::Auth("This projector requires a user name and password".into()));
+                    return Err(DriverError::Auth(
+                        "This projector requires a user name and password".into(),
+                    ));
                 }
                 let random = parts.next().unwrap_or("");
                 md5_hex(&format!("{}:{}:{}", self.username, self.password, random))
@@ -72,11 +76,15 @@ impl PanasonicDriver {
         let reply = line.strip_prefix("00").unwrap_or(&line).trim().to_string();
         match reply.to_ascii_uppercase().as_str() {
             "ERRA" => Err(DriverError::Auth("User name or password rejected".into())),
-            "ERR1" => Err(DriverError::Protocol("Not supported by this projector".into())),
+            "ERR1" => Err(DriverError::Protocol(
+                "Not supported by this projector".into(),
+            )),
             "ERR2" => Err(DriverError::Protocol("Projector rejected the value".into())),
             "ERR3" => Err(DriverError::Protocol("Projector is busy".into())),
             "ERR4" => Err(DriverError::Protocol("Projector timed out".into())),
-            "ERR5" => Err(DriverError::Protocol("Projector rejected the command length".into())),
+            "ERR5" => Err(DriverError::Protocol(
+                "Projector rejected the command length".into(),
+            )),
             _ => Ok(reply),
         }
     }
@@ -92,7 +100,11 @@ impl PanasonicDriver {
 }
 
 impl Driver for PanasonicDriver {
-    fn poll(&mut self, st: &mut ProjectorState, publish: &dyn Fn(&ProjectorState)) -> Result<(), DriverError> {
+    fn poll(
+        &mut self,
+        st: &mut ProjectorState,
+        publish: &dyn Fn(&ProjectorState),
+    ) -> Result<(), DriverError> {
         let on = self.exchange("QPW")?.trim() == "001";
         st.link = Link::Online;
         st.link_error = None;
@@ -111,12 +123,21 @@ impl Driver for PanasonicDriver {
         if st.inputs.is_empty() {
             st.inputs = INPUTS
                 .iter()
-                .map(|(c, n)| InputSource { code: c.to_string(), name: n.to_string() })
+                .map(|(c, n)| InputSource {
+                    code: c.to_string(),
+                    name: n.to_string(),
+                })
                 .collect();
         }
         st.errors = None;
-        if let Some(h) = self.query("Q$L:1")?.and_then(|v| v.trim().parse::<u32>().ok()) {
-            st.lamps = vec![Lamp { hours: h, on: st.power == Power::On }];
+        if let Some(h) = self
+            .query("Q$L:1")?
+            .and_then(|v| v.trim().parse::<u32>().ok())
+        {
+            st.lamps = vec![Lamp {
+                hours: h,
+                on: st.power == Power::On,
+            }];
         }
         if st.power == Power::On {
             st.input = self.query("QIN")?.map(|v| v.trim().to_string());
@@ -140,7 +161,9 @@ impl Driver for PanasonicDriver {
             Command::VolumeUp => "AUU".to_string(),
             Command::VolumeDown => "AUD".to_string(),
             Command::AudioMute(_) => {
-                return Err(DriverError::Protocol("Audio mute is not available over Panasonic native control".into()))
+                return Err(DriverError::Protocol(
+                    "Audio mute is not available over Panasonic native control".into(),
+                ))
             }
             Command::Refresh => return Ok(()),
         };
