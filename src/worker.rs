@@ -15,6 +15,13 @@ const POLL_TRANSITION: Duration = Duration::from_secs(1);
 const POLL_AFTER_COMMAND: Duration = Duration::from_millis(350);
 const BACKOFF_MAX: Duration = Duration::from_secs(20);
 const AUTH_RETRY: Duration = Duration::from_secs(15);
+/// A projector that has not answered yet is "checking", not "offline", for
+/// this long after its worker starts. The first connections of a freshly
+/// launched app can fail for reasons that pass within a moment (the system
+/// still deciding on local network access, a link just coming up), and those
+/// must not flash up as faults.
+pub const STARTUP_GRACE: Duration = Duration::from_secs(4);
+const STARTUP_RETRY: Duration = Duration::from_secs(1);
 
 enum Msg {
     Cmd(Command),
@@ -74,6 +81,7 @@ pub fn spawn(cfg: ProjectorConfig, repaint: Repaint) -> Handle {
                 repaint();
             };
             let mut failures: u32 = 0;
+            let started = Instant::now();
             let mut next_poll = Instant::now();
 
             loop {
@@ -125,8 +133,18 @@ pub fn spawn(cfg: ProjectorConfig, repaint: Repaint) -> Handle {
                     Err(e) => {
                         failures += 1;
                         // One missed poll is tolerated before declaring a
-                        // previously healthy projector offline.
-                        if failures >= 2 || st.link != Link::Online {
+                        // previously healthy projector offline, and one that
+                        // has never answered gets the startup grace.
+                        let settling =
+                            st.link == Link::Connecting && started.elapsed() < STARTUP_GRACE;
+                        let tolerated = st.link == Link::Online && failures < 2;
+                        if settling {
+                            thread_log.push(LogKind::Info, format!("No answer yet: {e}"));
+                            publish(&st);
+                            next_poll = Instant::now() + STARTUP_RETRY;
+                            continue;
+                        }
+                        if !tolerated {
                             if st.link != Link::Offline {
                                 thread_log.push(LogKind::Error, format!("Offline: {e}"));
                             }
