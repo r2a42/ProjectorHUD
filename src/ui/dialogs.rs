@@ -136,8 +136,10 @@ impl App {
     fn confirm_dialog(&mut self, ctx: &egui::Context, acts: &mut Vec<Act>) {
         let Some(c) = &self.confirm else { return };
         let mut decision: Option<bool> = None;
+        // The small windows are narrower than the usual dialog.
+        let width = (ctx.screen_rect().width() - 40.0).clamp(200.0, 360.0);
         dialog(&c.title).show(ctx, |ui| {
-            ui.set_width(360.0);
+            ui.set_width(width);
             ui.label(dim(&c.body));
             ui.add_space(12.0);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

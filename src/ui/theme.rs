@@ -367,20 +367,125 @@ pub fn status_bar(ui: &mut Ui, size: Vec2, text: &str, look: Look) -> Response {
     resp
 }
 
-/// The pictures on compact mode's buttons, drawn rather than taken from a
-/// font so they look the same everywhere. On and off are the marks on a
-/// rocker switch; the shutter is a gate, clear when open and solid when closed.
+/// The pictures on the small windows' buttons, drawn rather than taken from
+/// a font so they look the same everywhere. The shutter is a gate, clear when open and solid when closed.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
-    On,
-    Off,
     Open,
     Close,
     Info,
+    Power,
+    Pin,
 }
 
-/// A small square button with a picture. `active` marks one that is engaged.
-pub fn icon_button(ui: &mut Ui, size: Vec2, icon: Icon, enabled: bool, active: bool) -> Response {
+/// Colours for a button that is showing a state.
+#[derive(Clone, Copy, PartialEq)]
+pub struct Tint {
+    pub fill: Color32,
+    pub ink: Color32,
+    pub stroke: Color32,
+}
+
+/// A button glowing in one colour.
+pub fn tint(c: Color32) -> Tint {
+    Tint {
+        fill: mix(CARD, c, 0.24),
+        ink: c,
+        stroke: mix(CARD, c, 0.65),
+    }
+}
+
+/// Shutter open: white, as in the large window.
+pub const TINT_OPEN: Tint = Tint {
+    fill: Color32::from_rgb(0xF2, 0xF4, 0xF7),
+    ink: INK,
+    stroke: Color32::from_rgb(0xF2, 0xF4, 0xF7),
+};
+/// Shutter closed: black.
+pub const TINT_CLOSED: Tint = Tint {
+    fill: Color32::from_rgb(0x04, 0x05, 0x07),
+    ink: TEXT,
+    stroke: DIM,
+};
+/// Engaged, with no colour of its own.
+pub const TINT_PLAIN: Tint = Tint {
+    fill: Color32::from_rgb(0x4A, 0x55, 0x66),
+    ink: TEXT,
+    stroke: Color32::from_rgb(0x4A, 0x55, 0x66),
+};
+
+pub fn paint_icon(p: &egui::Painter, rect: egui::Rect, icon: Icon, ink: Color32) {
+    let c = rect.center();
+    let r = (rect.height().min(rect.width()) * 0.24).max(4.0);
+    let line = Stroke::new(1.6_f32, ink);
+    match icon {
+        Icon::Open => {
+            let gate = egui::Rect::from_center_size(c, Vec2::new(r * 2.4, r * 1.8));
+            p.rect_stroke(gate, 2.0, line);
+        }
+        Icon::Close => {
+            let gate = egui::Rect::from_center_size(c, Vec2::new(r * 2.4, r * 1.8));
+            p.rect_filled(gate, 2.0, ink);
+        }
+        Icon::Info => {
+            p.circle_filled(c - Vec2::new(0.0, r * 0.95), 1.4, ink);
+            p.line_segment(
+                [c - Vec2::new(0.0, r * 0.3), c + Vec2::new(0.0, r)],
+                Stroke::new(2.0_f32, ink),
+            );
+        }
+        Icon::Power => {
+            // A ring open at the top, with a bar through the gap.
+            let r = r * 1.15;
+            let c = c + Vec2::new(0.0, r * 0.1);
+            let points: Vec<egui::Pos2> = (0..=24)
+                .map(|i| {
+                    let a = (40.0 + 280.0 * i as f32 / 24.0).to_radians();
+                    c + Vec2::new(a.sin(), -a.cos()) * r
+                })
+                .collect();
+            p.add(egui::Shape::line(points, line));
+            p.line_segment(
+                [c - Vec2::new(0.0, r * 1.2), c - Vec2::new(0.0, r * 0.2)],
+                line,
+            );
+        }
+        Icon::Pin => {
+            // A drawing pin seen from the side.
+            let top = c.y - r * 1.1;
+            let base = c.y + r * 0.2;
+            p.line_segment(
+                [
+                    egui::pos2(c.x - r * 0.6, top),
+                    egui::pos2(c.x + r * 0.6, top),
+                ],
+                line,
+            );
+            p.rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(c.x - r * 0.38, top),
+                    egui::pos2(c.x + r * 0.38, base),
+                ),
+                0.0,
+                ink,
+            );
+            p.line_segment([egui::pos2(c.x - r, base), egui::pos2(c.x + r, base)], line);
+            p.line_segment(
+                [egui::pos2(c.x, base), egui::pos2(c.x, c.y + r * 1.25)],
+                line,
+            );
+        }
+    }
+}
+
+/// A small square button with a picture. `lit` colours one that is engaged.
+pub fn icon_button(
+    ui: &mut Ui,
+    size: Vec2,
+    icon: Icon,
+    enabled: bool,
+    lit: Option<Tint>,
+) -> Response {
     let (rect, resp) = ui.allocate_exact_size(
         size,
         if enabled {
@@ -401,43 +506,13 @@ pub fn icon_button(ui: &mut Ui, size: Vec2, icon: Icon, enabled: bool, active: b
     } else {
         0.0
     };
-    let (fill, ink) = if active {
-        (mix(CARD, ACCENT, 0.4 + lift), TEXT)
-    } else if enabled {
-        (mix(BUTTON, TEXT, lift), TEXT)
-    } else {
-        (mix(BUTTON, BG, 0.5), mix(FAINT, BG, 0.35))
+    let (fill, ink, stroke) = match lit {
+        Some(t) => (mix(t.fill, t.ink, lift * 0.5), t.ink, t.stroke),
+        None if enabled => (mix(BUTTON, TEXT, lift), TEXT, STROKE),
+        None => (mix(BUTTON, BG, 0.5), mix(FAINT, BG, 0.35), STROKE),
     };
-    let p = ui.painter();
-    p.rect(rect, 6.0, fill, Stroke::new(1.0_f32, STROKE));
-    let c = rect.center();
-    let r = (rect.height().min(rect.width()) * 0.24).max(4.0);
-    let line = Stroke::new(1.8_f32, ink);
-    match icon {
-        Icon::On => {
-            p.line_segment(
-                [c - Vec2::new(0.0, r), c + Vec2::new(0.0, r)],
-                Stroke::new(2.2_f32, ink),
-            );
-        }
-        Icon::Off => {
-            p.circle_stroke(c, r, line);
-        }
-        Icon::Open => {
-            let gate = egui::Rect::from_center_size(c, Vec2::new(r * 2.4, r * 1.8));
-            p.rect_stroke(gate, 2.0, line);
-        }
-        Icon::Close => {
-            let gate = egui::Rect::from_center_size(c, Vec2::new(r * 2.4, r * 1.8));
-            p.rect_filled(gate, 2.0, ink);
-        }
-        Icon::Info => {
-            p.circle_filled(c - Vec2::new(0.0, r * 0.95), 1.4, ink);
-            p.line_segment(
-                [c - Vec2::new(0.0, r * 0.3), c + Vec2::new(0.0, r)],
-                Stroke::new(2.0_f32, ink),
-            );
-        }
-    }
+    ui.painter()
+        .rect(rect, 6.0, fill, Stroke::new(1.0_f32, stroke));
+    paint_icon(ui.painter(), rect, icon, ink);
     resp
 }
