@@ -235,7 +235,7 @@ impl App {
 
             if ed.protocol == Protocol::Panasonic {
                 ui.add_space(4.0);
-                ui.label(small("Panasonic native control does not report fan, lamp or temperature faults. PJLink does."));
+                ui.label(small("Panasonic native control does not report fan, light source or temperature faults. PJLink does."));
             }
             if let Some(err) = &ed.error {
                 ui.add_space(4.0);
