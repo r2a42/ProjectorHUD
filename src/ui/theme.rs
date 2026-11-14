@@ -376,6 +376,7 @@ pub enum Icon {
     Info,
     Power,
     Pin,
+    Plus,
 }
 
 /// Colours for a button that is showing a state.
@@ -449,6 +450,10 @@ pub fn paint_icon(p: &egui::Painter, rect: egui::Rect, icon: Icon, ink: Color32)
                 [c - Vec2::new(0.0, r * 1.2), c - Vec2::new(0.0, r * 0.2)],
                 line,
             );
+        }
+        Icon::Plus => {
+            p.line_segment([c - Vec2::new(r, 0.0), c + Vec2::new(r, 0.0)], line);
+            p.line_segment([c - Vec2::new(0.0, r), c + Vec2::new(0.0, r)], line);
         }
         Icon::Pin => {
             // A drawing pin seen from the side.
