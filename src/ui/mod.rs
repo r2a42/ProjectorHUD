@@ -1357,7 +1357,7 @@ impl App {
                 if online {
                     if let Some(lamp) = st.lamps.first() {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.label(small(format!("Light source {} h", thousands(lamp.hours))));
+                            ui.label(small(format!("Light Source {} h", thousands(lamp.hours))));
                         });
                     }
                 }
@@ -1551,7 +1551,7 @@ impl App {
                         for (i, lamp) in st.lamps.iter().enumerate() {
                             ui.horizontal(|ui| {
                                 dot(ui, if lamp.on { GREEN } else { FAINT });
-                                ui.label(format!("Light source {}", i + 1));
+                                ui.label(format!("Light Source {}", i + 1));
                                 ui.label(RichText::new(format!("{} hours", thousands(lamp.hours))).strong());
                                 ui.label(dim(if lamp.on { "lit" } else { "off" }));
                             });
