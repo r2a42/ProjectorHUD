@@ -189,6 +189,11 @@ impl App {
             Ok("detail") => {
                 app.detail = by_name(&app, "Rehearsal");
             }
+            Ok("edit") => {
+                if let Some(id) = by_name(&app, "Rehearsal") {
+                    app.apply(Act::Edit(id));
+                }
+            }
             Ok("multi") => {
                 let ids = [by_name(&app, "Left"), by_name(&app, "Right")];
                 app.selection.extend(ids.into_iter().flatten());
@@ -427,7 +432,6 @@ impl App {
                     // These only fit in the large window.
                     self.show_scan = false;
                     self.show_schedules = false;
-                    self.editor = None;
                 }
                 self.cfg.size = size;
                 self.save();
@@ -571,9 +575,41 @@ impl eframe::App for App {
             }
             self.central(ctx, &items, &mut acts);
         } else {
+            // What does not fit in a small window gets a window of its own.
             rows_h = Some(self.compact(ctx, &items, &mut acts));
+            if let Some(item) = self
+                .detail
+                .and_then(|id| items.iter().find(|i| i.0.id == id))
+            {
+                let title = format!("{} details", item.0.name);
+                if self.pop_out(
+                    ctx,
+                    "details",
+                    &title,
+                    [340.0, 620.0],
+                    &mut acts,
+                    |app, ctx, acts| app.detail_panel(ctx, item, acts),
+                ) {
+                    self.detail = None;
+                }
+            }
+            if self.editor.is_some()
+                && self.pop_out(
+                    ctx,
+                    "editor",
+                    "Projector",
+                    [460.0, 500.0],
+                    &mut acts,
+                    |app, ctx, acts| app.editor_dialog(ctx, acts),
+                )
+            {
+                self.editor = None;
+            }
+            self.confirm_dialog(ctx, &mut acts);
         }
-        self.dialogs(ctx, &items, &mut acts);
+        if self.cfg.size == WindowSize::Large {
+            self.dialogs(ctx, &items, &mut acts);
+        }
         drag_label(ctx);
 
         let size_before = self.cfg.size;

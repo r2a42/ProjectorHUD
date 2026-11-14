@@ -237,6 +237,7 @@ fn projector_controls(
     small: bool,
     cfg: &ProjectorConfig,
     st: &ProjectorState,
+    detail_open: bool,
     acts: &mut Vec<Act>,
 ) {
     let id = Id::new(("compact", cfg.id));
@@ -284,12 +285,17 @@ fn projector_controls(
             power = Some(!matches!(side, Some((true, _))));
         }
     } else {
-        if icon_button(ui, ICON, Icon::Info, true, None)
-            .on_hover_text("Details, in the large window")
-            .clicked()
+        if icon_button(
+            ui,
+            ICON,
+            Icon::Info,
+            true,
+            detail_open.then(|| tint(ACCENT)),
+        )
+        .on_hover_text("Details, in a window of their own")
+        .clicked()
         {
-            acts.push(Act::SetSize(WindowSize::Large));
-            acts.push(Act::Detail(Some(cfg.id)));
+            acts.push(Act::Detail((!detail_open).then_some(cfg.id)));
         }
         let segs = [
             Seg {
@@ -334,17 +340,24 @@ fn projector_controls(
     }
 }
 
-/// A picture button that offers two choices when clicked.
+/// A picture button for a set of projectors. When they all agree it flips
+/// them to the other state (`flip`); when they differ it asks which.
+#[allow(clippy::too_many_arguments)]
 fn choice_button(
     ui: &mut egui::Ui,
     id: Id,
     icon: Icon,
+    enabled: bool,
     lit: Option<Tint>,
     tip: &str,
+    flip: Option<usize>,
     choices: [&str; 2],
 ) -> Option<usize> {
-    let resp = icon_button(ui, ICON, icon, true, lit).on_hover_text(tip);
+    let resp = icon_button(ui, ICON, icon, enabled, lit).on_hover_text(tip);
     if resp.clicked() {
+        if flip.is_some() {
+            return flip;
+        }
         ui.memory_mut(|m| m.toggle_popup(id));
     }
     let mut out = None;
@@ -382,28 +395,55 @@ fn set_controls(
     let mut set_power = None;
 
     if small {
-        ui.add_enabled_ui(any, |ui| {
-            let (icon, lit, tip) = match shutter {
-                Tri::AllOn => (Icon::Close, Some(TINT_CLOSED), "Shutters closed"),
-                Tri::Mixed => (Icon::Close, None, "Some shutters closed"),
-                Tri::AllOff => (Icon::Open, None, "Shutters open"),
-                Tri::Unknown => (Icon::Open, None, "Shutters"),
-            };
-            let choices = ["Open shutters", "Close shutters"];
-            if let Some(i) = choice_button(ui, id.with("shutter"), icon, lit, tip, choices) {
-                set_shutter = Some(i == 1);
-            }
-            let (lit, tip) = match power {
-                Tri::AllOn => (Some(tint(GREEN)), "All on"),
-                Tri::Mixed => (Some(tint(GREEN)), "Some on, some off"),
-                Tri::AllOff => (None, "All off"),
-                Tri::Unknown => (None, "Power"),
-            };
-            let choices = ["Power on", "Power off"];
-            if let Some(i) = choice_button(ui, id.with("power"), Icon::Power, lit, tip, choices) {
-                set_power = Some(i == 0);
-            }
-        });
+        let (icon, lit, tip, flip) = match shutter {
+            Tri::AllOn => (
+                Icon::Close,
+                Some(TINT_CLOSED),
+                "Shutters closed. Click to open them.",
+                Some(0),
+            ),
+            Tri::AllOff => (
+                Icon::Open,
+                None,
+                "Shutters open. Click to close them.",
+                Some(1),
+            ),
+            Tri::Mixed => (
+                Icon::Close,
+                None,
+                "Some shutters closed. Click to choose.",
+                None,
+            ),
+            Tri::Unknown => (Icon::Open, None, "Shutters", None),
+        };
+        let choices = ["Open shutters", "Close shutters"];
+        let can = any && shutter != Tri::Unknown;
+        if let Some(i) = choice_button(ui, id.with("shutter"), icon, can, lit, tip, flip, choices) {
+            set_shutter = Some(i == 1);
+        }
+        let (lit, tip, flip) = match power {
+            Tri::AllOn => (Some(tint(GREEN)), "All on. Click to power off.", Some(1)),
+            Tri::AllOff => (None, "All off. Click to power on.", Some(0)),
+            Tri::Mixed => (
+                Some(tint(GREEN)),
+                "Some on, some off. Click to choose.",
+                None,
+            ),
+            Tri::Unknown => (None, "Power", None),
+        };
+        let choices = ["Power on", "Power off"];
+        if let Some(i) = choice_button(
+            ui,
+            id.with("power"),
+            Icon::Power,
+            any,
+            lit,
+            tip,
+            flip,
+            choices,
+        ) {
+            set_power = Some(i == 0);
+        }
     } else {
         let segs = [
             Seg {
@@ -494,6 +534,12 @@ impl App {
                 ui.spacing_mut().item_spacing = Vec2::ZERO;
                 let left = strip(ui, head_h, PANEL, |ui| {
                     window_toggles(ui, &self.cfg, acts);
+                    if icon_button(ui, ICON, Icon::Plus, true, None)
+                        .on_hover_text("Add a projector")
+                        .clicked()
+                    {
+                        acts.push(Act::EditNew);
+                    }
                     ui.add_space(4.0);
                     let scope = format!("all {} projectors", all.len());
                     set_controls(ui, Id::new("compact-all"), small, &all, &scope, acts);
@@ -526,7 +572,7 @@ impl App {
                             ui.add_space(14.0);
                             ui.horizontal_wrapped(|ui| {
                                 ui.add_space(PAD);
-                                ui.label(dim("No projectors yet. Switch to the large window (L) to add them."));
+                                ui.label(dim("No projectors yet. Add one with the + button."));
                             });
                             height += 64.0;
                         }
@@ -611,7 +657,7 @@ impl App {
         let (cfg, st) = item;
         let small = self.cfg.size == WindowSize::Small;
         let left = strip(ui, h, BG, |ui| {
-            projector_controls(ui, small, cfg, st, acts);
+            projector_controls(ui, small, cfg, st, self.detail == Some(cfg.id), acts);
         });
         let sev = st.severity();
         let dot = if sev != Severity::Ok {
@@ -644,7 +690,69 @@ impl App {
                 note
             }
         );
-        ui.interact(left, Id::new(("compact-name", cfg.id)), Sense::hover())
-            .on_hover_text(tip);
+        ui.interact(left, Id::new(("compact-name", cfg.id)), Sense::click())
+            .on_hover_text(format!("{tip}\nRight-click to edit or remove."))
+            .context_menu(|ui| {
+                if ui.button("Details").clicked() {
+                    acts.push(Act::Detail(Some(cfg.id)));
+                    ui.close_menu();
+                }
+                if ui.button("Edit…").clicked() {
+                    acts.push(Act::Edit(cfg.id));
+                    ui.close_menu();
+                }
+                ui.menu_button("Move to group", |ui| {
+                    if ui
+                        .selectable_label(cfg.group.is_none(), "No group")
+                        .clicked()
+                    {
+                        acts.push(Act::MoveToGroup(vec![cfg.id], None));
+                        ui.close_menu();
+                    }
+                    for g in &self.cfg.groups {
+                        if ui
+                            .selectable_label(cfg.group.as_deref() == Some(g.as_str()), g)
+                            .clicked()
+                        {
+                            acts.push(Act::MoveToGroup(vec![cfg.id], Some(g.clone())));
+                            ui.close_menu();
+                        }
+                    }
+                });
+                ui.separator();
+                if ui.button(RichText::new("Remove…").color(RED)).clicked() {
+                    acts.push(remove_confirm(cfg));
+                    ui.close_menu();
+                }
+            });
+    }
+}
+
+impl App {
+    /// A separate little window beside a small one, for what will not fit
+    /// inside it. Returns true when its close button was pressed.
+    pub(super) fn pop_out(
+        &mut self,
+        ctx: &egui::Context,
+        key: &str,
+        title: &str,
+        size: [f32; 2],
+        acts: &mut Vec<Act>,
+        mut contents: impl FnMut(&mut Self, &egui::Context, &mut Vec<Act>),
+    ) -> bool {
+        let mut builder = egui::ViewportBuilder::default()
+            .with_title(title)
+            .with_inner_size(size)
+            .with_resizable(false);
+        if self.cfg.on_top {
+            builder = builder.with_always_on_top();
+        }
+        ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(key), builder, |ctx, _| {
+            contents(self, ctx, acts);
+            egui::CentralPanel::default()
+                .frame(egui::Frame::none().fill(PANEL))
+                .show(ctx, |_| {});
+            ctx.input(|i| i.viewport().close_requested())
+        })
     }
 }

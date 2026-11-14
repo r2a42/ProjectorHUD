@@ -133,7 +133,7 @@ impl App {
         self.confirm_dialog(ctx, acts);
     }
 
-    fn confirm_dialog(&mut self, ctx: &egui::Context, acts: &mut Vec<Act>) {
+    pub(super) fn confirm_dialog(&mut self, ctx: &egui::Context, acts: &mut Vec<Act>) {
         let Some(c) = &self.confirm else { return };
         let mut decision: Option<bool> = None;
         // The small windows are narrower than the usual dialog.
@@ -165,7 +165,7 @@ impl App {
         }
     }
 
-    fn editor_dialog(&mut self, ctx: &egui::Context, acts: &mut Vec<Act>) {
+    pub(super) fn editor_dialog(&mut self, ctx: &egui::Context, acts: &mut Vec<Act>) {
         let groups = self.cfg.groups.clone();
         let Some(ed) = &mut self.editor else { return };
         let mut close = false;
