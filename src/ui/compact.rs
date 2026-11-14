@@ -205,7 +205,7 @@ fn power_side(st: &ProjectorState) -> Option<(bool, Tint)> {
         Power::On => Some((true, tint(GREEN))),
         Power::Warming => Some((true, tint(AMBER))),
         Power::Cooling => Some((false, tint(COOL))),
-        Power::Standby => Some((false, TINT_PLAIN)),
+        Power::Standby => Some((false, tint(RED))),
         Power::Unknown => None,
     }
 }
@@ -257,9 +257,15 @@ fn projector_controls(
         } else {
             (Icon::Open, "Shutter")
         };
-        if icon_button(ui, ICON, icon, can_shutter, closed.then_some(TINT_CLOSED))
-            .on_hover_text(tip)
-            .clicked()
+        if icon_button(
+            ui,
+            ICON,
+            icon,
+            can_shutter,
+            (open || closed).then_some(TINT_SHUTTER),
+        )
+        .on_hover_text(tip)
+        .clicked()
         {
             shutter = Some(!closed);
         }
@@ -275,7 +281,7 @@ fn projector_controls(
             Some((false, t)) if st.power == Power::Cooling => {
                 (Some(t), "Cooling down. Click to power on.")
             }
-            Some((false, _)) => (None, "Off. Click to power on."),
+            Some((false, t)) => (Some(t), "Off. Click to power on."),
             None => (None, "Power"),
         };
         if icon_button(ui, ICON, Icon::Power, online, lit)
@@ -300,12 +306,12 @@ fn projector_controls(
         let segs = [
             Seg {
                 face: Face::Icon(Icon::Open),
-                lit: open.then_some(TINT_OPEN),
+                lit: open.then_some(TINT_SHUTTER),
                 tip: "Open the shutter",
             },
             Seg {
                 face: Face::Icon(Icon::Close),
-                lit: closed.then_some(TINT_CLOSED),
+                lit: closed.then_some(TINT_SHUTTER),
                 tip: "Close the shutter",
             },
         ];
@@ -398,19 +404,19 @@ fn set_controls(
         let (icon, lit, tip, flip) = match shutter {
             Tri::AllOn => (
                 Icon::Close,
-                Some(TINT_CLOSED),
+                Some(TINT_SHUTTER),
                 "Shutters closed. Click to open them.",
                 Some(0),
             ),
             Tri::AllOff => (
                 Icon::Open,
-                None,
+                Some(TINT_SHUTTER),
                 "Shutters open. Click to close them.",
                 Some(1),
             ),
             Tri::Mixed => (
-                Icon::Close,
-                None,
+                Icon::Mixed,
+                Some(TINT_SHUTTER),
                 "Some shutters closed. Click to choose.",
                 None,
             ),
@@ -423,7 +429,7 @@ fn set_controls(
         }
         let (lit, tip, flip) = match power {
             Tri::AllOn => (Some(tint(GREEN)), "All on. Click to power off.", Some(1)),
-            Tri::AllOff => (None, "All off. Click to power on.", Some(0)),
+            Tri::AllOff => (Some(tint(RED)), "All off. Click to power on.", Some(0)),
             Tri::Mixed => (
                 Some(tint(GREEN)),
                 "Some on, some off. Click to choose.",
@@ -448,12 +454,12 @@ fn set_controls(
         let segs = [
             Seg {
                 face: Face::Icon(Icon::Open),
-                lit: matches!(shutter, Tri::AllOff | Tri::Mixed).then_some(TINT_OPEN),
+                lit: matches!(shutter, Tri::AllOff | Tri::Mixed).then_some(TINT_SHUTTER),
                 tip: "Open shutters",
             },
             Seg {
                 face: Face::Icon(Icon::Close),
-                lit: matches!(shutter, Tri::AllOn | Tri::Mixed).then_some(TINT_CLOSED),
+                lit: matches!(shutter, Tri::AllOn | Tri::Mixed).then_some(TINT_SHUTTER),
                 tip: "Close shutters",
             },
         ];
@@ -468,7 +474,7 @@ fn set_controls(
             },
             Seg {
                 face: Face::Text("Off"),
-                lit: matches!(power, Tri::AllOff | Tri::Mixed).then_some(TINT_PLAIN),
+                lit: matches!(power, Tri::AllOff | Tri::Mixed).then(|| tint(RED)),
                 tip: "Power off",
             },
         ];

@@ -1795,9 +1795,10 @@ fn control_buttons(
         let mut ui = column(ui, col + GAP, col);
         let size = Vec2::new(col, BTN_H);
         let state = if on { st.video_mute } else { None };
-        let r = state_button(
+        let r = state_button_icon(
             &mut ui,
             size,
+            Some(Icon::Open),
             "Open shutter",
             13.0,
             Look::Neutral,
@@ -1808,15 +1809,16 @@ fn control_buttons(
         {
             acts.push(Act::Send(cfg.id, Command::VideoMute(false)));
         }
-        let (text, look) = match state {
-            Some(false) => ("OPEN", SHUTTER_OPEN),
-            Some(true) => ("CLOSED", SHUTTER_CLOSED),
-            None => ("—", Look::Neutral),
+        let (icon, text, look) = match state {
+            Some(false) => (Some(Icon::Open), "OPEN", SHUTTER_STATE),
+            Some(true) => (Some(Icon::Close), "CLOSED", SHUTTER_STATE),
+            None => (None, "—", Look::Neutral),
         };
-        status_bar(&mut ui, Vec2::new(col, status_h), text, look);
-        let r = state_button(
+        status_bar_icon(&mut ui, Vec2::new(col, status_h), icon, text, look);
+        let r = state_button_icon(
             &mut ui,
             size,
+            Some(Icon::Close),
             "Close shutter",
             13.0,
             Look::Neutral,
@@ -1962,6 +1964,11 @@ fn group_stack(ui: &mut egui::Ui, kind: Kind, state: Tri, width: f32, btn_h: f32
             let size = Vec2::new(width, btn_h);
             let known = state != Tri::Unknown && ui.is_enabled();
             // `top_sets`: the state the upper button puts the group in.
+            let icons = match kind {
+                Kind::Power => [None; 3],
+                // Open, closed, and a group with some of each.
+                Kind::Shutter => [Icon::Open, Icon::Close, Icon::Mixed].map(Some),
+            };
             let (top, bottom, top_sets, on_look, off_look, on_text, off_text) = match kind {
                 Kind::Power => (
                     "Power on",
@@ -1976,16 +1983,18 @@ fn group_stack(ui: &mut egui::Ui, kind: Kind, state: Tri, width: f32, btn_h: f32
                     "Open shutters",
                     "Close shutters",
                     false,
-                    SHUTTER_CLOSED,
-                    SHUTTER_OPEN,
+                    SHUTTER_STATE,
+                    SHUTTER_STATE,
                     "CLOSED",
                     "OPEN",
                 ),
             };
             let already = |v: bool| state == if v { Tri::AllOn } else { Tri::AllOff };
-            if state_button(
+            // The upper button opens the shutters; for power it has no picture.
+            if state_button_icon(
                 ui,
                 size,
+                icons[0],
                 top,
                 font,
                 Look::Neutral,
@@ -1995,16 +2004,19 @@ fn group_stack(ui: &mut egui::Ui, kind: Kind, state: Tri, width: f32, btn_h: f32
             {
                 out = Some(top_sets);
             }
-            let (text, look) = match state {
-                Tri::AllOn => (on_text, on_look),
-                Tri::AllOff => (off_text, off_look),
-                Tri::Mixed => ("MIXED", Look::striped(on_look, off_look)),
-                Tri::Unknown => ("—", Look::Neutral),
+            let (icon, text, look) = match state {
+                Tri::AllOn => (icons[1], on_text, on_look),
+                Tri::AllOff => (icons[0], off_text, off_look),
+                // Shutters share one colour, so the picture marks a mixed group.
+                Tri::Mixed if icons[2].is_some() => (icons[2], "MIXED", on_look),
+                Tri::Mixed => (None, "MIXED", Look::striped(on_look, off_look)),
+                Tri::Unknown => (None, "—", Look::Neutral),
             };
-            status_bar(ui, size, text, look);
-            if state_button(
+            status_bar_icon(ui, size, icon, text, look);
+            if state_button_icon(
                 ui,
                 size,
+                icons[1],
                 bottom,
                 font,
                 Look::Neutral,

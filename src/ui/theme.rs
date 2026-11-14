@@ -205,12 +205,9 @@ pub enum Look {
 }
 
 const INK: Color32 = Color32::from_rgb(0x08, 0x0B, 0x10);
-/// Shutter closed: black. Shutter open: white.
-pub const SHUTTER_CLOSED: Look = Look::Solid {
-    fill: Color32::from_rgb(0x04, 0x05, 0x07),
-    text: TEXT,
-};
-pub const SHUTTER_OPEN: Look = Look::Solid {
+/// The shutter's current state, open or closed: white. The picture beside
+/// the word says which.
+pub const SHUTTER_STATE: Look = Look::Solid {
     fill: Color32::from_rgb(0xF2, 0xF4, 0xF7),
     text: INK,
 };
@@ -244,6 +241,23 @@ pub fn state_button(
     look: Look,
     enabled: bool,
 ) -> Response {
+    state_button_icon(ui, min_size, None, text, font, look, enabled)
+}
+
+/// Width a picture takes up beside a word.
+const ICON_W: f32 = 19.0;
+
+/// A [`state_button`] with a picture before its words.
+pub fn state_button_icon(
+    ui: &mut Ui,
+    min_size: Vec2,
+    icon: Option<Icon>,
+    text: &str,
+    font: f32,
+    look: Look,
+    enabled: bool,
+) -> Response {
+    let icon_w = if icon.is_some() { ICON_W } else { 0.0 };
     let look = if enabled { look } else { Look::Neutral };
     let text_color = match look {
         Look::Solid { text, .. } => text,
@@ -255,7 +269,7 @@ pub fn state_button(
         ui.painter()
             .layout_no_wrap(text.to_string(), FontId::proportional(font), text_color);
     let size = Vec2::new(
-        min_size.x.max(galley.size().x + 12.0),
+        min_size.x.max(galley.size().x + icon_w + 12.0),
         min_size.y.max(galley.size().y + 6.0),
     );
     let (rect, resp) = ui.allocate_exact_size(
@@ -277,7 +291,7 @@ pub fn state_button(
         0.0
     };
     let p = ui.painter();
-    let text_pos = rect.center() - galley.size() / 2.0;
+    let text_pos = rect.center() - galley.size() / 2.0 + Vec2::new(icon_w / 2.0, 0.0);
     match look {
         Look::Solid { fill, text } => {
             // Lighten dark buttons and darken light ones on hover.
@@ -313,6 +327,15 @@ pub fn state_button(
             p.rect(rect, 8.0, fill, Stroke::new(1.0_f32, STROKE));
         }
     }
+    if let Some(icon) = icon {
+        let at = egui::pos2(text_pos.x - ICON_W + 7.0, rect.center().y);
+        paint_icon(
+            p,
+            egui::Rect::from_center_size(at, Vec2::splat(18.0)),
+            icon,
+            text_color,
+        );
+    }
     p.galley(text_pos, galley, text_color);
     resp
 }
@@ -334,6 +357,17 @@ fn stripes(p: &egui::Painter, rect: egui::Rect, rounding: f32, a: Color32, b: Co
 /// The present state, shown between the two buttons that change it.
 /// Striped when a group's members are in different states.
 pub fn status_bar(ui: &mut Ui, size: Vec2, text: &str, look: Look) -> Response {
+    status_bar_icon(ui, size, None, text, look)
+}
+
+/// A [`status_bar`] with a picture before its word.
+pub fn status_bar_icon(
+    ui: &mut Ui,
+    size: Vec2,
+    icon: Option<Icon>,
+    text: &str,
+    look: Look,
+) -> Response {
     let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
     let bar = rect.shrink2(Vec2::new(0.0, 3.0));
     let font = FontId::proportional(11.5);
@@ -341,7 +375,20 @@ pub fn status_bar(ui: &mut Ui, size: Vec2, text: &str, look: Look) -> Response {
     match look {
         Look::Solid { fill, text: color } => {
             p.rect(bar, 6.0, fill, Stroke::new(1.0_f32, mix(fill, color, 0.35)));
-            p.text(bar.center(), egui::Align2::CENTER_CENTER, text, font, color);
+            let Some(icon) = icon else {
+                p.text(bar.center(), egui::Align2::CENTER_CENTER, text, font, color);
+                return resp;
+            };
+            let galley = p.layout_no_wrap(text.to_string(), font, color);
+            let pos = bar.center() - galley.size() / 2.0 + Vec2::new(ICON_W / 2.0, 0.0);
+            let at = egui::pos2(pos.x - ICON_W + 7.0, bar.center().y);
+            paint_icon(
+                p,
+                egui::Rect::from_center_size(at, Vec2::splat(18.0)),
+                icon,
+                color,
+            );
+            p.galley(pos, galley, color);
         }
         Look::Striped(a, b) => {
             stripes(p, bar, 6.0, a, b);
@@ -368,11 +415,14 @@ pub fn status_bar(ui: &mut Ui, size: Vec2, text: &str, look: Look) -> Response {
 }
 
 /// The pictures on the small windows' buttons, drawn rather than taken from
-/// a font so they look the same everywhere. The shutter is a gate, clear when open and solid when closed.
+/// a font so they look the same everywhere. The shutter is a lens: with light
+/// in it when open, crossed out when closed, and both side by side for a
+/// group whose shutters differ.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
     Open,
     Close,
+    Mixed,
     Info,
     Power,
     Pin,
@@ -396,37 +446,39 @@ pub fn tint(c: Color32) -> Tint {
     }
 }
 
-/// Shutter open: white, as in the large window.
-pub const TINT_OPEN: Tint = Tint {
+/// The shutter's current state, open or closed: white, as in the large
+/// window. The picture says which.
+pub const TINT_SHUTTER: Tint = Tint {
     fill: Color32::from_rgb(0xF2, 0xF4, 0xF7),
     ink: INK,
     stroke: Color32::from_rgb(0xF2, 0xF4, 0xF7),
 };
-/// Shutter closed: black.
-pub const TINT_CLOSED: Tint = Tint {
-    fill: Color32::from_rgb(0x04, 0x05, 0x07),
-    ink: TEXT,
-    stroke: DIM,
-};
-/// Engaged, with no colour of its own.
-pub const TINT_PLAIN: Tint = Tint {
-    fill: Color32::from_rgb(0x4A, 0x55, 0x66),
-    ink: TEXT,
-    stroke: Color32::from_rgb(0x4A, 0x55, 0x66),
-};
+
+/// The shutter as a lens of radius `r`: a dot of light when open, an X when closed.
+fn lens(p: &egui::Painter, c: egui::Pos2, r: f32, closed: bool, ink: Color32) {
+    let w = (r * 0.27).clamp(1.2, 1.8);
+    p.circle_stroke(c, r, Stroke::new(w, ink));
+    if closed {
+        let d = r * 0.42;
+        let x = Stroke::new(w * 1.15, ink);
+        p.line_segment([c + Vec2::new(-d, -d), c + Vec2::new(d, d)], x);
+        p.line_segment([c + Vec2::new(d, -d), c + Vec2::new(-d, d)], x);
+    } else {
+        p.circle_filled(c, r * 0.42, ink);
+    }
+}
 
 pub fn paint_icon(p: &egui::Painter, rect: egui::Rect, icon: Icon, ink: Color32) {
     let c = rect.center();
     let r = (rect.height().min(rect.width()) * 0.24).max(4.0);
     let line = Stroke::new(1.6_f32, ink);
     match icon {
-        Icon::Open => {
-            let gate = egui::Rect::from_center_size(c, Vec2::new(r * 2.4, r * 1.8));
-            p.rect_stroke(gate, 2.0, line);
-        }
-        Icon::Close => {
-            let gate = egui::Rect::from_center_size(c, Vec2::new(r * 2.4, r * 1.8));
-            p.rect_filled(gate, 2.0, ink);
+        Icon::Open => lens(p, c, r * 1.25, false, ink),
+        Icon::Close => lens(p, c, r * 1.25, true, ink),
+        Icon::Mixed => {
+            let small = r * 0.85;
+            lens(p, c - Vec2::new(small + 1.0, 0.0), small, false, ink);
+            lens(p, c + Vec2::new(small + 1.0, 0.0), small, true, ink);
         }
         Icon::Info => {
             p.circle_filled(c - Vec2::new(0.0, r * 0.95), 1.4, ink);
