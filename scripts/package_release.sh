@@ -26,6 +26,7 @@ case "$platform" in
   linux-x64)
     cp target/release/projectorhud "$stage/"
     chmod +x "$stage/projectorhud"
+    cp assets/icon/icon_256.png "$stage/projectorhud.png"
     tar -C dist/stage -czf "dist/${name}.tar.gz" "$name"
     ;;
   macos-universal)
@@ -33,6 +34,7 @@ case "$platform" in
     mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
     cp target/release/projectorhud "$app/Contents/MacOS/projectorhud"
     chmod +x "$app/Contents/MacOS/projectorhud"
+    cp assets/icon/ProjectorHUD.icns "$app/Contents/Resources/ProjectorHUD.icns"
     cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -42,6 +44,7 @@ case "$platform" in
   <key>CFBundleDisplayName</key><string>ProjectorHUD</string>
   <key>CFBundleIdentifier</key><string>io.github.r2a42.projectorhud</string>
   <key>CFBundleExecutable</key><string>projectorhud</string>
+  <key>CFBundleIconFile</key><string>ProjectorHUD</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${tag#v}</string>
   <key>CFBundleVersion</key><string>${tag#v}</string>

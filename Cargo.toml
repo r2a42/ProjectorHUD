@@ -1,6 +1,6 @@
 [package]
 name = "projectorhud"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 license = "MIT"
 description = "Monitor and control a fleet of networked projectors (PJLink, Panasonic) from one window."
@@ -16,6 +16,9 @@ chrono = "0.4"
 directories = "5"
 if-addrs = "0.13"
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+[build-dependencies]
+winresource = "0.1"
 
 [profile.release]
 opt-level = 3
