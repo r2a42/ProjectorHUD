@@ -98,7 +98,7 @@ impl Errors {
     pub fn items(&self) -> [(&'static str, Severity); 6] {
         [
             ("Fan", self.fan),
-            ("Lamp", self.lamp),
+            ("Light source", self.lamp),
             ("Temperature", self.temperature),
             ("Cover", self.cover),
             ("Filter", self.filter),
