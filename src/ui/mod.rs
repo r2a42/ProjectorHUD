@@ -843,7 +843,7 @@ impl App {
                         };
                         card_frame().show(ui, |ui| {
                             let shape = Shape::of(self.cfg.compact);
-                            ui.allocate_ui_with_layout(Vec2::new(shape.width() * 2.0 + 8.0, shape.height()), Layout::left_to_right(Align::Center), |ui| {
+                            ui.allocate_ui_with_layout(Vec2::new(shape.width() * 2.0 + if shape.horizontal { 6.0 } else { 8.0 }, shape.height()), Layout::left_to_right(Align::Center), |ui| {
                                 ui.add_enabled_ui(n > 0, |ui| group_controls(ui, &visible, shape, &scope, acts));
                             });
                         });
@@ -900,7 +900,7 @@ impl App {
                             if let Some(ids) = dropped {
                                 acts.push(Act::MoveToGroup(ids, group.clone()));
                             }
-                            ui.add_space(14.0);
+                            ui.add_space(if self.cfg.compact { 4.0 } else { 14.0 });
                         }
                     }
                     ui.add_space(8.0);
@@ -1024,37 +1024,35 @@ impl App {
             Head(&'a Head<'a>),
             Projector(&'a Item),
         }
-        if self.cfg.compact {
-            ui.scope(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(6.0, 5.0);
-                if let Some(head) = head {
-                    group_row(ui, head, acts);
-                }
-                for (cfg, st) in items.iter().map(|i| (&i.0, &i.1)) {
-                    order.push(cfg.id);
-                    self.row(ui, cfg, st, acts);
-                }
-            });
-            return;
-        }
         let tiles: Vec<Tile> = head
             .map(Tile::Head)
             .into_iter()
             .chain(items.iter().map(|i| Tile::Projector(i)))
             .collect();
+        let compact = self.cfg.compact;
+        let (min_w, gap) = if compact {
+            (COMPACT_MIN_W, 6.0)
+        } else {
+            (CARD_MIN_W, GAP)
+        };
         let avail = ui.available_width();
-        let cols = (((avail + GAP) / (CARD_MIN_W + GAP)).floor() as usize).max(1);
-        let w = ((avail - GAP * (cols as f32 - 1.0)) / cols as f32).floor();
+        let cols = (((avail + gap) / (min_w + gap)).floor() as usize).max(1);
+        let w = ((avail - gap * (cols as f32 - 1.0)) / cols as f32).floor();
         ui.scope(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::splat(GAP);
+            ui.spacing_mut().item_spacing = Vec2::splat(gap);
             for row in tiles.chunks(cols) {
                 ui.horizontal(|ui| {
                     for tile in row {
                         match tile {
+                            Tile::Head(head) if compact => group_row(ui, w, head, acts),
                             Tile::Head(head) => group_card(ui, w, head, acts),
                             Tile::Projector((cfg, st)) => {
                                 order.push(cfg.id);
-                                self.card(ui, w, cfg, st, acts);
+                                if compact {
+                                    self.row(ui, w, cfg, st, acts);
+                                } else {
+                                    self.card(ui, w, cfg, st, acts);
+                                }
                             }
                         }
                     }
@@ -1174,42 +1172,40 @@ impl App {
         rect
     }
 
-    /// Compact mode: a projector on one line. Name, faults, then the same
-    /// power and shutter controls as its card, laid out sideways.
+    /// Compact mode: a projector as one short line, narrow enough to sit
+    /// several across. A fault mark, the name, then power, shutter and
+    /// details as picture buttons. Hovering explains everything.
     fn row(
         &self,
         ui: &mut egui::Ui,
+        w: f32,
         cfg: &ProjectorConfig,
         st: &ProjectorState,
         acts: &mut Vec<Act>,
     ) {
-        let rect = self.shell(
-            ui,
-            Vec2::new(ui.available_width(), ROW_H),
-            8.0,
-            cfg,
-            st,
-            acts,
-        );
+        let rect = self.shell(ui, Vec2::new(w, ROW_H), 8.0, cfg, st, acts);
         let mut child = row_ui(ui, rect);
         let ui = &mut child;
-        details_button(ui, self.detail == Some(cfg.id), cfg.id, acts);
+        let open = self.detail == Some(cfg.id);
+        let tip = if open {
+            "Close the details pane"
+        } else {
+            "Details"
+        };
+        if icon_button(ui, Shape::COMPACT.button, Icon::Info, true, open)
+            .on_hover_text(tip)
+            .clicked()
+        {
+            acts.push(Act::Detail((!open).then_some(cfg.id)));
+        }
         ui.allocate_ui_with_layout(
-            Vec2::new(Shape::COMPACT.width() * 2.0 + 8.0, ROW_H - 10.0),
+            Vec2::new(Shape::COMPACT.width() * 2.0 + 6.0, ROW_H - 10.0),
             Layout::left_to_right(Align::Center),
             |ui| compact_controls(ui, cfg, st, acts),
         );
-        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-            dot(ui, power_color(st));
-            let (text, color, strong) = fault_line(st);
-            row_text(
-                ui,
-                &cfg.name,
-                14.0,
-                fault_text(text, color, strong),
-                small(subtitle(cfg, st)),
-            );
-        });
+        let (fault, color, strong) = fault_line(st);
+        let about = format!("{}\n{}", cfg.name, subtitle(cfg, st));
+        row_name(ui, &cfg.name, 13.5, &about, &fault, color, strong);
     }
 
     fn card(
@@ -1836,8 +1832,8 @@ fn group_stack(ui: &mut egui::Ui, kind: Kind, state: Tri, shape: Shape) -> Optio
     // `top_sets`: the state the first button puts the group in.
     let (top, bottom, top_sets, on_look, off_look, on_text, off_text) = match kind {
         Kind::Power => (
-            if shape.horizontal { "On" } else { "Power on" },
-            if shape.horizontal { "Off" } else { "Power off" },
+            "Power on",
+            "Power off",
             true,
             POWER_ON,
             POWER_OFF,
@@ -1845,16 +1841,8 @@ fn group_stack(ui: &mut egui::Ui, kind: Kind, state: Tri, shape: Shape) -> Optio
             "OFF",
         ),
         Kind::Shutter => (
-            if shape.horizontal {
-                "Open"
-            } else {
-                "Open shutters"
-            },
-            if shape.horizontal {
-                "Close"
-            } else {
-                "Close shutters"
-            },
+            "Open shutters",
+            "Close shutters",
             false,
             SHUTTER_CLOSED,
             SHUTTER_OPEN,
@@ -1870,15 +1858,19 @@ fn group_stack(ui: &mut egui::Ui, kind: Kind, state: Tri, shape: Shape) -> Optio
         Tri::Unknown => ("—", Look::Neutral),
     };
     let tips = match kind {
-        Kind::Power => ("Power them on", "Power them off"),
-        Kind::Shutter => ("Open their shutters", "Close their shutters"),
+        Kind::Power => ("Power on", "Power off"),
+        Kind::Shutter => ("Open shutters", "Close shutters"),
+    };
+    let icons = match kind {
+        Kind::Power => (Icon::On, Icon::Off),
+        Kind::Shutter => (Icon::Open, Icon::Close),
     };
     let (first, second) = three(
         ui,
         shape,
-        (top, known && !already(top_sets), tips.0),
+        (top, icons.0, known && !already(top_sets), tips.0),
         (text, look),
-        (bottom, known && !already(!top_sets), tips.1),
+        (bottom, icons.1, known && !already(!top_sets), tips.1),
     );
     if first {
         Some(top_sets)
@@ -1898,7 +1890,7 @@ fn group_controls(
     acts: &mut Vec<Act>,
 ) {
     let ids: Vec<u64> = items.iter().map(|i| i.0.id).collect();
-    ui.spacing_mut().item_spacing.x = 8.0;
+    ui.spacing_mut().item_spacing.x = if shape.horizontal { 6.0 } else { 8.0 };
     if let Some(on) = group_stack(ui, Kind::Power, power_state(items), shape) {
         acts.push(power_many(ids.clone(), on, scope));
     }
@@ -2225,7 +2217,9 @@ fn welcome(ui: &mut egui::Ui, acts: &mut Vec<Act>) {
 }
 
 /// Height of a projector's line in compact mode.
-const ROW_H: f32 = 40.0;
+const ROW_H: f32 = 34.0;
+/// The narrowest a compact line gets: about a quarter of the default window.
+const COMPACT_MIN_W: f32 = 270.0;
 
 /// How a button / state / button control is laid out: stacked on the cards,
 /// sideways with short labels in compact mode.
@@ -2240,8 +2234,8 @@ struct Shape {
 impl Shape {
     const COMPACT: Shape = Shape {
         horizontal: true,
-        button: Vec2::new(42.0, 26.0),
-        status: Vec2::new(62.0, 26.0),
+        button: Vec2::new(24.0, 24.0),
+        status: Vec2::new(22.0, 24.0),
         font: 12.0,
     };
     fn stack(width: f32, btn_h: f32) -> Shape {
@@ -2262,7 +2256,7 @@ impl Shape {
     }
     fn width(&self) -> f32 {
         if self.horizontal {
-            self.button.x * 2.0 + self.status.x + 6.0
+            self.button.x * 2.0 + self.status.x + 4.0
         } else {
             self.button.x
         }
@@ -2277,13 +2271,14 @@ impl Shape {
 }
 
 /// A button, the present state, and the opposite button. Each button is
-/// (label, enabled, tooltip). Returns which of the two was clicked.
+/// (label, picture, enabled, tooltip): stacked ones show the label, sideways
+/// ones the picture. Returns which of the two was clicked.
 fn three(
     ui: &mut egui::Ui,
     shape: Shape,
-    first: (&str, bool, &str),
+    first: (&str, Icon, bool, &str),
     status: (&str, Look),
-    second: (&str, bool, &str),
+    second: (&str, Icon, bool, &str),
 ) -> (bool, bool) {
     let mut out = (false, false);
     let layout = if shape.horizontal {
@@ -2293,21 +2288,33 @@ fn three(
     };
     ui.allocate_ui_with_layout(Vec2::new(shape.width(), shape.height()), layout, |ui| {
         ui.spacing_mut().item_spacing = if shape.horizontal {
-            Vec2::new(3.0, 0.0)
+            Vec2::new(2.0, 0.0)
         } else {
             Vec2::ZERO
         };
         ui.spacing_mut().button_padding = Vec2::new(4.0, 3.0);
-        let button = |ui: &mut egui::Ui, (label, enabled, tip): (&str, bool, &str)| {
-            let r = state_button(ui, shape.button, label, shape.font, Look::Neutral, enabled);
+        let button = |ui: &mut egui::Ui, (label, icon, enabled, tip): (&str, Icon, bool, &str)| {
             if shape.horizontal {
-                r.on_hover_text(tip).clicked()
+                icon_button(ui, shape.button, icon, enabled, false)
+                    .on_hover_text(tip)
+                    .on_disabled_hover_text(tip)
+                    .clicked()
             } else {
-                r.clicked()
+                state_button(ui, shape.button, label, shape.font, Look::Neutral, enabled).clicked()
             }
         };
         out.0 = button(ui, first);
-        status_bar(ui, shape.status, status.0, status.1);
+        if shape.horizontal {
+            // The colour is the state; the word is in the tooltip.
+            let word = if status.0 == "—" {
+                "Unknown"
+            } else {
+                status.0
+            };
+            status_bar(ui, shape.status, "", status.1).on_hover_text(word);
+        } else {
+            status_bar(ui, shape.status, status.0, status.1);
+        }
         out.1 = button(ui, second);
     });
     out
@@ -2346,13 +2353,18 @@ fn compact_controls(
 ) {
     let online = st.link == Link::Online;
     let on = online && st.power == Power::On;
-    ui.spacing_mut().item_spacing.x = 8.0;
+    ui.spacing_mut().item_spacing.x = 6.0;
     let (power_on, power_off) = three(
         ui,
         Shape::COMPACT,
-        ("On", online && st.power == Power::Standby, "Power on"),
+        (
+            "",
+            Icon::On,
+            online && st.power == Power::Standby,
+            "Power on",
+        ),
         power_status(st),
-        ("Off", on, "Power off"),
+        ("", Icon::Off, on, "Power off"),
     );
     if power_on {
         acts.push(Act::Send(cfg.id, Command::PowerOn));
@@ -2364,13 +2376,13 @@ fn compact_controls(
     let (open, close) = three(
         ui,
         Shape::COMPACT,
-        ("Open", shutter == Some(true), "Open shutter"),
+        ("", Icon::Open, shutter == Some(true), "Open shutter"),
         match shutter {
             Some(false) => ("OPEN", SHUTTER_OPEN),
             Some(true) => ("CLOSED", SHUTTER_CLOSED),
             None => ("—", Look::Neutral),
         },
-        ("Close", shutter == Some(false), "Close shutter"),
+        ("", Icon::Close, shutter == Some(false), "Close shutter"),
     );
     if open {
         acts.push(Act::Send(cfg.id, Command::VideoMute(false)));
@@ -2433,66 +2445,41 @@ fn group_fault_line(members: &[&Item]) -> (String, Color32, bool) {
 fn row_ui(ui: &mut egui::Ui, rect: egui::Rect) -> egui::Ui {
     let mut child = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(rect.shrink2(Vec2::new(12.0, 5.0)))
+            .max_rect(rect.shrink2(Vec2::new(8.0, 5.0)))
             .layout(Layout::right_to_left(Align::Center)),
     );
-    child.spacing_mut().item_spacing.x = 8.0;
+    child.spacing_mut().item_spacing.x = 6.0;
     child
 }
 
-/// The left of a compact line: a name, the fault text, and whatever else
-/// fits. With room, the columns line up down the list; without it, the name
-/// takes only what it needs so the fault text stays readable.
-fn row_text(ui: &mut egui::Ui, name: &str, name_size: f32, fault: RichText, extra: RichText) {
-    let h = ui.available_height();
-    let left = ui.available_width();
-    let natural = ui
-        .painter()
-        .layout_no_wrap(
-            name.to_string(),
-            egui::FontId::proportional(name_size),
-            TEXT,
-        )
-        .size()
-        .x
-        + 4.0;
-    let name_w = if left >= 420.0 {
-        (left * 0.38).min(240.0)
-    } else {
-        natural.min(left * 0.55)
-    };
-    let column = |ui: &mut egui::Ui, w: f32, text: RichText, tip: &str| {
-        ui.allocate_ui_with_layout(
-            Vec2::new(w, h),
-            Layout::left_to_right(Align::Center),
-            |ui| {
-                ui.set_min_width(w);
-                ui.add(egui::Label::new(text).truncate()).on_hover_text(tip);
-            },
-        );
-    };
-    column(
-        ui,
-        name_w,
-        RichText::new(name).size(name_size).strong(),
-        name,
-    );
-    let rest = ui.available_width();
-    let fault_w = if rest > 300.0 { rest * 0.45 } else { rest };
-    let tip = fault.text().to_string();
-    column(ui, fault_w.max(0.0), fault, &tip);
-    if ui.available_width() > 90.0 {
-        ui.add(egui::Label::new(extra).truncate());
-    }
-}
-
-fn fault_text(text: String, color: Color32, strong: bool) -> RichText {
-    let rich = RichText::new(text).color(color).size(13.0);
-    if strong {
-        rich.strong()
-    } else {
-        rich
-    }
+/// The left of a compact line: a fault mark and the name. The mark is a
+/// tick when all is well, so its absence never has to be read as "fine".
+fn row_name(
+    ui: &mut egui::Ui,
+    name: &str,
+    size: f32,
+    about: &str,
+    fault: &str,
+    color: Color32,
+    attention: bool,
+) {
+    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+        ui.spacing_mut().item_spacing.x = 5.0;
+        let mark = if attention {
+            "⚠"
+        } else if color == GREEN {
+            "✔"
+        } else {
+            "…"
+        };
+        let words = fault.trim_start_matches(['⚠', '✔', ' ']);
+        ui.label(RichText::new(mark).color(color).size(13.0))
+            .on_hover_text(words);
+        let text = RichText::new(name).size(size).strong();
+        let text = if attention { text.color(color) } else { text };
+        ui.add(egui::Label::new(text).truncate())
+            .on_hover_text(format!("{about}\n{words}"));
+    });
 }
 
 fn details_button(ui: &mut egui::Ui, open: bool, id: u64, acts: &mut Vec<Act>) {
@@ -2520,17 +2507,16 @@ fn details_button(ui: &mut egui::Ui, open: bool, id: u64, acts: &mut Vec<Act>) {
 }
 
 /// Compact mode: a group's line, leading its projectors, with its controls
-/// in the same columns as theirs.
-fn group_row(ui: &mut egui::Ui, head: &Head, acts: &mut Vec<Act>) {
-    let (rect, resp) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::click());
+/// in the same places as theirs.
+fn group_row(ui: &mut egui::Ui, w: f32, head: &Head, acts: &mut Vec<Act>) {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, ROW_H), Sense::click());
     let members = head.members;
-    let fill = mix(CARD, ACCENT, if resp.hovered() { 0.16 } else { 0.12 });
+    let fill = mix(CARD, ACCENT, if resp.hovered() { 0.24 } else { 0.18 });
     ui.painter().rect(
         rect,
         8.0,
         fill,
-        Stroke::new(1.0_f32, mix(STROKE, ACCENT, 0.55)),
+        Stroke::new(1.0_f32, mix(STROKE, ACCENT, 0.7)),
     );
     if let Some(g) = &head.group {
         if resp.double_clicked() {
@@ -2541,14 +2527,21 @@ fn group_row(ui: &mut egui::Ui, head: &Head, acts: &mut Vec<Act>) {
     }
     let mut child = row_ui(ui, rect);
     let ui = &mut child;
-    // The width of a projector's Details button, so the controls line up.
+    // Where a projector's details button sits: how many are in the group.
     ui.allocate_ui_with_layout(
-        Vec2::new(58.0, ROW_H - 10.0),
+        Shape::COMPACT.button,
         Layout::centered_and_justified(egui::Direction::LeftToRight),
-        |ui| ui.label(RichText::new("GROUP").color(ACCENT).size(11.0).strong()),
+        |ui| {
+            ui.label(
+                RichText::new(members.len().to_string())
+                    .color(ACCENT)
+                    .size(12.0)
+                    .strong(),
+            )
+        },
     );
     ui.allocate_ui_with_layout(
-        Vec2::new(Shape::COMPACT.width() * 2.0 + 8.0, ROW_H - 10.0),
+        Vec2::new(Shape::COMPACT.width() * 2.0 + 6.0, ROW_H - 10.0),
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.add_enabled_ui(!members.is_empty(), |ui| {
@@ -2556,22 +2549,16 @@ fn group_row(ui: &mut egui::Ui, head: &Head, acts: &mut Vec<Act>) {
             });
         },
     );
-    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-        let n = members.len();
-        let on = members
-            .iter()
-            .filter(|i| i.1.link == Link::Online && i.1.power == Power::On)
-            .count();
-        let (text, color, strong) = group_fault_line(members);
-        row_text(
-            ui,
-            &head.title,
-            15.0,
-            fault_text(text, color, strong),
-            small(format!(
-                "{n} {}  ·  {on} on",
-                if n == 1 { "projector" } else { "projectors" }
-            )),
-        );
-    });
+    let n = members.len();
+    let on = members
+        .iter()
+        .filter(|i| i.1.link == Link::Online && i.1.power == Power::On)
+        .count();
+    let (fault, color, strong) = group_fault_line(members);
+    let about = format!(
+        "{}: {n} {}, {on} on",
+        head.title,
+        if n == 1 { "projector" } else { "projectors" }
+    );
+    row_name(ui, &head.title, 14.0, &about, &fault, color, strong);
 }

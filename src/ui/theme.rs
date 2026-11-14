@@ -333,8 +333,8 @@ fn stripes(p: &egui::Painter, rect: egui::Rect, rounding: f32, a: Color32, b: Co
 
 /// The present state, shown between the two buttons that change it.
 /// Striped when a group's members are in different states.
-pub fn status_bar(ui: &mut Ui, size: Vec2, text: &str, look: Look) {
-    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+pub fn status_bar(ui: &mut Ui, size: Vec2, text: &str, look: Look) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
     let bar = rect.shrink2(Vec2::new(0.0, 3.0));
     let font = FontId::proportional(11.5);
     let p = ui.painter();
@@ -346,6 +346,9 @@ pub fn status_bar(ui: &mut Ui, size: Vec2, text: &str, look: Look) {
         Look::Striped(a, b) => {
             stripes(p, bar, 6.0, a, b);
             p.rect_stroke(bar, 6.0, Stroke::new(1.0_f32, mix(STROKE, TEXT, 0.3)));
+            if text.is_empty() {
+                return resp;
+            }
             let galley = p.layout_no_wrap(text.to_string(), font, TEXT);
             let pos = bar.center() - galley.size() / 2.0;
             let back = egui::Rect::from_min_size(pos, galley.size()).expand2(Vec2::new(6.0, 0.0));
@@ -361,4 +364,80 @@ pub fn status_bar(ui: &mut Ui, size: Vec2, text: &str, look: Look) {
             p.text(bar.center(), egui::Align2::CENTER_CENTER, text, font, FAINT);
         }
     }
+    resp
+}
+
+/// The pictures on compact mode's buttons, drawn rather than taken from a
+/// font so they look the same everywhere. On and off are the marks on a
+/// rocker switch; the shutter is a gate, clear when open and solid when closed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Icon {
+    On,
+    Off,
+    Open,
+    Close,
+    Info,
+}
+
+/// A small square button with a picture. `active` marks one that is engaged.
+pub fn icon_button(ui: &mut Ui, size: Vec2, icon: Icon, enabled: bool, active: bool) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(
+        size,
+        if enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
+    );
+    if !ui.is_rect_visible(rect) {
+        return resp;
+    }
+    let lift = if !enabled {
+        0.0
+    } else if resp.is_pointer_button_down_on() {
+        0.22
+    } else if resp.hovered() {
+        0.12
+    } else {
+        0.0
+    };
+    let (fill, ink) = if active {
+        (mix(CARD, ACCENT, 0.4 + lift), TEXT)
+    } else if enabled {
+        (mix(BUTTON, TEXT, lift), TEXT)
+    } else {
+        (mix(BUTTON, BG, 0.5), mix(FAINT, BG, 0.35))
+    };
+    let p = ui.painter();
+    p.rect(rect, 6.0, fill, Stroke::new(1.0_f32, STROKE));
+    let c = rect.center();
+    let r = (rect.height().min(rect.width()) * 0.24).max(4.0);
+    let line = Stroke::new(1.8_f32, ink);
+    match icon {
+        Icon::On => {
+            p.line_segment(
+                [c - Vec2::new(0.0, r), c + Vec2::new(0.0, r)],
+                Stroke::new(2.2_f32, ink),
+            );
+        }
+        Icon::Off => {
+            p.circle_stroke(c, r, line);
+        }
+        Icon::Open => {
+            let gate = egui::Rect::from_center_size(c, Vec2::new(r * 2.4, r * 1.8));
+            p.rect_stroke(gate, 2.0, line);
+        }
+        Icon::Close => {
+            let gate = egui::Rect::from_center_size(c, Vec2::new(r * 2.4, r * 1.8));
+            p.rect_filled(gate, 2.0, ink);
+        }
+        Icon::Info => {
+            p.circle_filled(c - Vec2::new(0.0, r * 0.95), 1.4, ink);
+            p.line_segment(
+                [c - Vec2::new(0.0, r * 0.3), c + Vec2::new(0.0, r)],
+                Stroke::new(2.0_f32, ink),
+            );
+        }
+    }
+    resp
 }
