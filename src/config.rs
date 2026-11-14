@@ -23,6 +23,9 @@ pub struct AppConfig {
     /// projectors at once.
     #[serde(default)]
     pub zoom: f32,
+    /// Compact mode: one line per projector instead of a card.
+    #[serde(default)]
+    pub compact: bool,
 }
 
 pub const ZOOM_MIN: f32 = 0.5;
