@@ -17,6 +17,10 @@ directories = "5"
 if-addrs = "0.13"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
+# Where the screens are, to keep the window on the one it is on.
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+display-info = "0.5"
+
 [build-dependencies]
 winresource = "0.1"
 
