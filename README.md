@@ -53,7 +53,7 @@ The **S / M / L** switch at the top right turns the whole app into a small windo
 | Medium: a short list | Small: a strip of buttons |
 | :---: | :---: |
 | <img src="docs/medium.png" width="440" alt="The medium window"> | <img src="docs/small.png" width="280" alt="The small window"> |
-| Name, fault or address, an On/Off switch, a shutter switch and a details button for every projector. | One line per projector. The power and shutter buttons change colour with the state. |
+| Name, fault or address, an On/Off switch, a shutter switch and a details button for every projector. | One line per projector. The power button is green when on and red when off. The shutter button shows a lens when open and an X when closed. |
 
 In both, a group's row controls the whole group, and clicking it folds the group away to make the window smaller still. Right-click a projector for details, edit, move to group and remove; details and editing open in a little window of their own.
 
