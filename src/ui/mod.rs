@@ -213,6 +213,10 @@ impl App {
                 app.selection.extend(ids.into_iter().flatten());
                 app.detail = by_name(&app, "Rehearsal");
             }
+            Ok("select") => {
+                let ids = [by_name(&app, "Left"), by_name(&app, "Right")];
+                app.selection.extend(ids.into_iter().flatten());
+            }
             Ok("schedules") => app.show_schedules = true,
             Ok("scan") => app.apply(Act::OpenScan),
             _ => {}
@@ -1029,11 +1033,13 @@ impl App {
                 });
 
                 self.tools_row(ui, items, acts);
-                ui.add_space(4.0);
 
                 let mut order: Vec<u64> = Vec::new();
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     ui.set_width(ui.available_width() - 12.0);
+                    // Room for a selected card's outline, which sits outside the card
+                    // and would otherwise be cut off by the top of the scrolling area.
+                    ui.add_space(5.0);
                     let grouped = self.view == Target::All && !self.cfg.groups.is_empty();
                     if !grouped {
                         if visible.is_empty() {
