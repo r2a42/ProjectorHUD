@@ -2,6 +2,7 @@
 
 mod compact;
 mod dialogs;
+mod screens;
 mod theme;
 
 use eframe::egui::{self, Align, Color32, Layout, RichText, Sense, Stroke, Vec2};
@@ -110,6 +111,12 @@ pub struct App {
     sized_for: Option<WindowSize>,
     fitted: Option<Vec2>,
     on_top_applied: bool,
+    /// The window has just changed size class and still has to be put in
+    /// the matching place on its screen.
+    replace: bool,
+    /// Developer aid: `PROJECTORHUD_DEV_SCRIPT="move 1500 300;size Large"`
+    /// runs one step every second and a half, to test window placement.
+    dev: Option<(Instant, Vec<String>)>,
     /// How big the large window was, to go back to.
     large_size: Option<Vec2>,
 }
@@ -158,6 +165,13 @@ impl App {
             sized_for: None,
             fitted: None,
             on_top_applied: false,
+            replace: false,
+            dev: std::env::var("PROJECTORHUD_DEV_SCRIPT").ok().map(|s| {
+                (
+                    Instant::now() + Duration::from_secs(2),
+                    s.split(';').map(|p| p.trim().to_string()).collect(),
+                )
+            }),
             large_size: None,
             shot: std::env::var("PROJECTORHUD_SCREENSHOT")
                 .ok()
@@ -483,10 +497,12 @@ impl App {
         if size == WindowSize::Large {
             let now = ctx.screen_rect().size();
             if was.is_some_and(|w| w != size) {
+                let want = self.large_size.unwrap_or(compact::LARGE_DEFAULT);
                 ctx.send_viewport_cmd(Cmd::MinInnerSize(compact::LARGE_MIN));
-                ctx.send_viewport_cmd(Cmd::InnerSize(
-                    self.large_size.unwrap_or(compact::LARGE_DEFAULT),
-                ));
+                ctx.send_viewport_cmd(Cmd::InnerSize(want));
+                if let Some(to) = screens::place(ctx, want, true) {
+                    ctx.send_viewport_cmd(Cmd::OuterPosition(to));
+                }
             } else if now.x >= compact::LARGE_MIN.x - 1.0 {
                 self.large_size = Some(now);
             }
@@ -497,6 +513,7 @@ impl App {
         if was != Some(size) {
             ctx.send_viewport_cmd(Cmd::MinInnerSize(Vec2::new(width, 36.0)));
             self.fitted = None;
+            self.replace = true;
         }
         let Some(mut rows_h) = rows_h else {
             ctx.request_repaint();
@@ -512,6 +529,36 @@ impl App {
         if self.fitted != Some(want) {
             self.fitted = Some(want);
             ctx.send_viewport_cmd(Cmd::InnerSize(want));
+            // A change of size class keeps the window's place on its screen;
+            // a list that merely grew only moves if it would hang off the edge.
+            let in_proportion = std::mem::take(&mut self.replace);
+            if let Some(to) = screens::place(ctx, want, in_proportion) {
+                ctx.send_viewport_cmd(Cmd::OuterPosition(to));
+            }
+        }
+    }
+
+    fn dev_script(&mut self, ctx: &egui::Context) {
+        let Some((at, steps)) = &mut self.dev else {
+            return;
+        };
+        ctx.request_repaint_after(Duration::from_millis(200));
+        if Instant::now() < *at || steps.is_empty() {
+            return;
+        }
+        *at = Instant::now() + Duration::from_millis(1500);
+        let step = steps.remove(0);
+        let words: Vec<&str> = step.split_whitespace().collect();
+        match words.as_slice() {
+            ["move", x, y] => {
+                if let (Ok(x), Ok(y)) = (x.parse(), y.parse()) {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, y)));
+                }
+            }
+            ["size", "Large"] => self.apply(Act::SetSize(WindowSize::Large)),
+            ["size", "Medium"] => self.apply(Act::SetSize(WindowSize::Medium)),
+            ["size", "Small"] => self.apply(Act::SetSize(WindowSize::Small)),
+            _ => eprintln!("dev script: unknown step {step:?}"),
         }
     }
 
@@ -612,6 +659,7 @@ impl eframe::App for App {
         }
         drag_label(ctx);
 
+        self.dev_script(ctx);
         let size_before = self.cfg.size;
         for act in acts {
             self.apply(act);
