@@ -23,9 +23,29 @@ pub struct AppConfig {
     /// projectors at once.
     #[serde(default)]
     pub zoom: f32,
-    /// Compact mode: one line per projector instead of a card.
+    /// Which of the three windows is showing.
     #[serde(default)]
-    pub compact: bool,
+    pub size: WindowSize,
+    /// Keep the window above other programs' windows.
+    #[serde(default)]
+    pub on_top: bool,
+    /// Groups folded away in the small windows ("" is the ungrouped list).
+    #[serde(default)]
+    pub collapsed: Vec<String>,
+}
+
+/// The whole app at three sizes: the full window, a short list, or a narrow
+/// strip of icons.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WindowSize {
+    #[default]
+    Large,
+    Medium,
+    Small,
+}
+
+impl WindowSize {
+    pub const ALL: [WindowSize; 3] = [WindowSize::Small, WindowSize::Medium, WindowSize::Large];
 }
 
 pub const ZOOM_MIN: f32 = 0.5;
